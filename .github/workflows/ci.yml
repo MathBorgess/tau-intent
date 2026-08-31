@@ -16,3 +16,7 @@ jobs:
         run: PYTHONPATH=src python3 -m unittest discover -s tests -v
         env:
           NO_NETWORK: "1"
+      - name: pin check
+        run: PYTHONPATH=src python3 -m tau_intent.pin --check
+        env:
+          NO_NETWORK: "1"
