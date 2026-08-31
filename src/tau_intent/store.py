@@ -1,3 +1,7 @@
+"""Append-only JSONL intent store. The only write is append."""
+
+from __future__ import annotations
+
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -6,58 +10,67 @@ from tau_intent.model import Anchor, IntentEntry
 
 
 class IntentStore:
-    def __init__(self, root_path: Path):
-        self.root_path = Path(root_path)
-        self.file_path = self.root_path / "intents.jsonl"
+    """Append-only. Current vs superseded is derived from ``supersedes``."""
 
-    def append(self, entry: IntentEntry) -> IntentEntry:
-        current = self._current_entries()
-        supersedes = set(entry.supersedes)
-        for existing in current:
-            if self._entries_overlap(existing, entry):
-                supersedes.add(existing.id)
-        stored = replace(entry, supersedes=tuple(sorted(supersedes)))
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.file_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(stored), ensure_ascii=False) + "\n")
-        return stored
+    def __init__(self, path: Path):
+        path = Path(path)
+        self.path = path / "intents.jsonl" if path.suffix != ".jsonl" else path
+        self._entries = self._read()
+        self._superseded = {sid for e in self._entries for sid in e.supersedes}
 
-    def query_region(
-        self,
-        path: str,
-        start_line: int,
-        end_line: int,
-    ) -> list[IntentEntry]:
-        anchor = Anchor(path=path, start_line=start_line, end_line=end_line)
-        return [
-            entry
-            for entry in self._current_entries()
-            if any(candidate.overlaps(anchor) for candidate in entry.anchors)
-        ]
+    def current(self) -> list[IntentEntry]:
+        return [e for e in self._entries if e.id not in self._superseded]
 
-    def _read_entries(self) -> list[IntentEntry]:
-        if not self.file_path.exists():
+    def query_region(self, file: str, line_start: int, line_end: int) -> list[IntentEntry]:
+        probe = Anchor(
+            file=file,
+            symbol=None,
+            line_start=line_start,
+            line_end=line_end,
+            blob_sha="",
+        )
+        return [e for e in self.current() if e.anchor.overlaps(probe)]
+
+    def append(self, nova: IntentEntry) -> IntentEntry:
+        sobrepostas = [e.id for e in self.current() if e.anchor.overlaps(nova.anchor)]
+        nova = replace(nova, supersedes=tuple(sobrepostas))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(asdict(nova), ensure_ascii=False) + "\n")
+        self._entries.append(nova)
+        self._superseded.update(sobrepostas)
+        return nova
+
+    def _read(self) -> list[IntentEntry]:
+        if not self.path.exists():
             return []
         entries: list[IntentEntry] = []
-        with self.file_path.open("r", encoding="utf-8") as handle:
+        with self.path.open(encoding="utf-8") as handle:
             for line in handle:
-                data = json.loads(line)
-                entries.append(
-                    IntentEntry(
-                        id=data["id"],
-                        why=data["why"],
-                        property=data.get("property"),
-                        anchors=tuple(Anchor(**anchor) for anchor in data["anchors"]),
-                        supersedes=tuple(data.get("supersedes", [])),
-                    )
-                )
+                line = line.strip()
+                if not line:
+                    continue
+                entries.append(_entry_from_dict(json.loads(line)))
         return entries
 
-    def _current_entries(self) -> list[IntentEntry]:
-        entries = self._read_entries()
-        superseded_ids = {item for entry in entries for item in entry.supersedes}
-        return [entry for entry in entries if entry.id not in superseded_ids]
 
-    @staticmethod
-    def _entries_overlap(left: IntentEntry, right: IntentEntry) -> bool:
-        return any(a.overlaps(b) for a in left.anchors for b in right.anchors)
+def _entry_from_dict(data: dict) -> IntentEntry:
+    raw_anchor = data["anchor"]
+    return IntentEntry(
+        id=data["id"],
+        ts=data["ts"],
+        task_id=data["task_id"],
+        anchor=Anchor(
+            file=raw_anchor["file"],
+            symbol=raw_anchor.get("symbol"),
+            line_start=raw_anchor["line_start"],
+            line_end=raw_anchor["line_end"],
+            blob_sha=raw_anchor["blob_sha"],
+        ),
+        why=data["why"],
+        property=data.get("property") or "",
+        domain=data.get("domain") or "",
+        supersedes=tuple(data.get("supersedes") or ()),
+        author=data.get("author", "agent"),
+        trigger_log=tuple(data.get("trigger_log") or ()),
+    )
