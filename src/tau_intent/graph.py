@@ -1,185 +1,136 @@
-"""Static Python graph extraction for projection (PR slice #5)."""
+"""Typed AST graph. No user code is executed."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ast
+from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+
+EDGE_TYPES = ("contains", "imports", "invokes", "inherits")
 
 
-_GRAPH_CACHE: dict[tuple[str, str], "IntentGraph"] = {}
+class Graph:
+    """Minimal multi-digraph. Avoids a networkx dependency in v1."""
+
+    def __init__(self) -> None:
+        self.nodes: dict[str, dict] = {}
+        self._out: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self._in: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self._degree: dict[str, int] = defaultdict(int)
+
+    def add_node(self, node_id: str, **attrs: object) -> None:
+        self.nodes.setdefault(node_id, {}).update(attrs)
+
+    def add_edge(self, src: str, dst: str, key: str) -> None:
+        self.add_node(src)
+        self.add_node(dst)
+        self._out[src].append((dst, key))
+        self._in[dst].append((src, key))
+        self._degree[src] += 1
+        self._degree[dst] += 1
+
+    def degree(self, node_id: str) -> int:
+        return int(self._degree.get(node_id, 0))
+
+    def neighbors(
+        self, node_id: str, edge_types: tuple[str, ...] | None = None
+    ) -> list[tuple[str, str, str]]:
+        """Return (other, edge_type, direction) with direction in {saida, entrada}."""
+        allowed = set(edge_types or EDGE_TYPES)
+        out = [
+            (dst, key, "saida")
+            for dst, key in self._out.get(node_id, [])
+            if key in allowed
+        ]
+        incoming = [
+            (src, key, "entrada")
+            for src, key in self._in.get(node_id, [])
+            if key in allowed
+        ]
+        return out + incoming
 
 
-@dataclass(frozen=True)
-class GraphEdge:
-    source: str
-    destination: str
-    kind: str
+def build(root: Path) -> Graph:
+    root = Path(root)
+    graph = Graph()
+    files = [path for path in root.rglob("*.py") if "__pycache__" not in path.parts]
+    file_ids = {str(path.relative_to(root)) for path in files}
+    for path in files:
+        fid = str(path.relative_to(root))
+        graph.add_node(fid, kind="file")
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alvo in _resolve_import(node, fid, file_ids):
+                    graph.add_edge(fid, alvo, key="imports")
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                sid = f"{fid}::{node.name}"
+                graph.add_node(sid, kind=type(node).__name__, lineno=node.lineno)
+                graph.add_edge(fid, sid, key="contains")
+                for base in getattr(node, "bases", []):
+                    graph.add_edge(sid, _name(base), key="inherits")
+                for chamada in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
+                    graph.add_edge(sid, _name(chamada.func), key="invokes")
+    return graph
 
 
-class IntentGraph:
-    """Graph with typed edges and optional hub pruning for traversal."""
-
-    def __init__(self, edges: Iterable[GraphEdge]):
-        self.edges = list(edges)
-        self.nodes: set[str] = set()
-        self._adjacency: dict[str, set[str]] = {}
-        for edge in self.edges:
-            self.nodes.add(edge.source)
-            self.nodes.add(edge.destination)
-            self._adjacency.setdefault(edge.source, set()).add(edge.destination)
-            self._adjacency.setdefault(edge.destination, set()).add(edge.source)
-        for node in self.nodes:
-            self._adjacency.setdefault(node, set())
-
-    def degree(self, node: str) -> int:
-        return len(self._adjacency.get(node, ()))
-
-    def mean_degree(self) -> float:
-        if not self.nodes:
-            return 0.0
-        return sum(self.degree(node) for node in self.nodes) / float(len(self.nodes))
-
-    def hub_nodes(self, lambda_factor: float) -> set[str]:
-        mean = self.mean_degree()
-        if mean <= 0:
-            return set()
-        threshold = lambda_factor * mean
-        return {node for node in self.nodes if self.degree(node) > threshold}
-
-    def one_hop(
-        self,
-        seeds: Iterable[str],
-        *,
-        prune_hubs: bool = True,
-        lambda_factor: float = 2.0,
-    ) -> set[str]:
-        del prune_hubs, lambda_factor
-        seed_list = tuple(seeds)
-        selected = set(seed_list)
-        for seed in seed_list:
-            selected.update(self._adjacency.get(seed, ()))
-        return selected
-
-    def expand(
-        self,
-        seeds: Iterable[str],
-        *,
-        hops: int,
-        prune_hubs: bool = True,
-        lambda_factor: float = 2.0,
-    ) -> set[str]:
-        hubs = self.hub_nodes(lambda_factor) if prune_hubs else set()
-        seed_set = set(seeds)
-        visited = set(seed_set)
-        frontier = set(seed_set)
-        for _ in range(max(0, hops)):
-            next_frontier: set[str] = set()
-            for node in frontier:
-                if node in hubs:
-                    continue
-                for neighbor in self._adjacency.get(node, ()):
-                    if neighbor not in visited:
-                        visited.add(neighbor)
-                        next_frontier.add(neighbor)
-            frontier = next_frontier
-            if not frontier:
-                break
-        return visited
+@lru_cache(maxsize=8)
+def build_cached(root: str, commit_sha: str) -> Graph:
+    del commit_sha
+    return build(Path(root))
 
 
-class _GraphBuilder(ast.NodeVisitor):
-    def __init__(self, module_node: str):
-        self.module_node = module_node
-        self.scope: list[str] = []
-        self.edges: list[GraphEdge] = []
-
-    def _current_scope(self) -> str:
-        if not self.scope:
-            return self.module_node
-        return f"{self.module_node}::" + ".".join(self.scope)
-
-    def _add_contains(self, name: str) -> None:
-        self.edges.append(GraphEdge(source=self._current_scope(), destination=name, kind="contains"))
-
-    def _qualified_symbol(self, name: str) -> str:
-        if not self.scope:
-            return f"{self.module_node}::{name}"
-        return f"{self.module_node}::" + ".".join([*self.scope, name])
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        class_node = self._qualified_symbol(node.name)
-        self._add_contains(class_node)
-        for base in node.bases:
-            base_name = _dotted_name(base)
-            if base_name:
-                self.edges.append(
-                    GraphEdge(source=class_node, destination=base_name, kind="inherits")
-                )
-        self.scope.append(node.name)
-        self.generic_visit(node)
-        self.scope.pop()
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        fn_node = self._qualified_symbol(node.name)
-        self._add_contains(fn_node)
-        self.scope.append(node.name)
-        self.generic_visit(node)
-        self.scope.pop()
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self.visit_FunctionDef(node)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            self.edges.append(
-                GraphEdge(source=self._current_scope(), destination=alias.name, kind="imports")
-            )
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module:
-            self.edges.append(
-                GraphEdge(source=self._current_scope(), destination=node.module, kind="imports")
-            )
-
-    def visit_Call(self, node: ast.Call) -> None:
-        target = _dotted_name(node.func)
-        if target:
-            self.edges.append(
-                GraphEdge(source=self._current_scope(), destination=target, kind="invokes")
-            )
-        self.generic_visit(node)
+def build_graph(root: str | Path, *, cache_key: str | None = None) -> Graph:
+    if cache_key is not None:
+        return build_cached(str(Path(root)), cache_key)
+    return build(Path(root))
 
 
-def _dotted_name(node: ast.AST) -> str | None:
+def marcar_onipresentes(graph: Graph, lam: float = 3.0) -> set[str]:
+    """Nodes whose degree exceeds lam × mean degree are destinations, not bridges."""
+    if not graph.nodes:
+        return set()
+    graus = [graph.degree(node_id) for node_id in graph.nodes]
+    media = sum(graus) / max(len(graus), 1)
+    return {node_id for node_id in graph.nodes if graph.degree(node_id) > lam * media}
+
+
+def _name(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
-        root = _dotted_name(node.value)
-        return f"{root}.{node.attr}" if root else node.attr
-    if isinstance(node, ast.Call):
-        return _dotted_name(node.func)
-    return None
+        return f"{_name(node.value)}.{node.attr}"
+    return type(node).__name__
 
 
-def build_graph(root: str | Path, *, cache_key: str | None = None) -> IntentGraph:
-    base = Path(root).resolve()
-    if cache_key is not None:
-        cache_id = (str(base), cache_key)
-        cached = _GRAPH_CACHE.get(cache_id)
-        if cached is not None:
-            return cached
-    edges: list[GraphEdge] = []
-    for py_file in sorted(base.rglob("*.py")):
-        rel = py_file.relative_to(base).as_posix()
-        module_node = rel
-        source = py_file.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(py_file))
-        builder = _GraphBuilder(module_node=module_node)
-        builder.visit(tree)
-        edges.extend(builder.edges)
-    graph = IntentGraph(edges)
-    if cache_key is not None:
-        _GRAPH_CACHE[(str(base), cache_key)] = graph
-    return graph
+def _resolve_import(node: ast.AST, fid: str, file_ids: set[str]) -> list[str]:
+    targets: list[str] = []
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            targets.extend(_match_module(alias.name, file_ids))
+    elif isinstance(node, ast.ImportFrom):
+        module = node.module or ""
+        if node.level:
+            parts = Path(fid).parts[:-1]
+            climb = max(node.level - 1, 0)
+            if climb:
+                parts = parts[:-climb] if climb <= len(parts) else ()
+            prefix = ".".join(parts)
+            module = f"{prefix}.{module}".strip(".") if module else prefix
+        targets.extend(_match_module(module, file_ids))
+        for alias in node.names:
+            targets.extend(_match_module(f"{module}.{alias.name}" if module else alias.name, file_ids))
+    return targets
+
+
+def _match_module(module: str, file_ids: set[str]) -> list[str]:
+    if not module:
+        return []
+    as_path = module.replace(".", "/") + ".py"
+    as_pkg = module.replace(".", "/") + "/__init__.py"
+    found = [candidate for candidate in (as_path, as_pkg) if candidate in file_ids]
+    return found
