@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tau-intent"
+version = "0.1.0"
+description = "Intent-history mechanism around Hugging Face tau. Not a fork."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matheus Borges" }]
+dependencies = []
+
+[project.optional-dependencies]
+tau = []
+
+[project.scripts]
+tau-intent = "tau_intent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
