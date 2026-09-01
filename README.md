@@ -36,4 +36,6 @@ A→B is a **package** (store + gate + one extra tool). The isolated piece is pr
 
 See [`docs/SPEC-V1.md`](docs/SPEC-V1.md) and [`AGENTS.md`](AGENTS.md). Five PRs. No orchestrator adapter. No V5 labelled set. No live model in CI.
 
+Sampling note: in v1, the owner configures temperature=0 on the provider they expose.
+
 Pre-registration of the TG is the vault file `estudos/harness-tau/2026-08-27-pre-registro.md`. **There is no `EXPERIMENTO.md` or `SPEC.md` in this repo describing another experiment.** Do not invent them.
