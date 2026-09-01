@@ -1,0 +1,9 @@
+# v1 defaults. Read, never fitted.
+gamma: 0.1
+max_nodes: 200
+lambda_grau: 3.0
+prune_hubs: true
+llm_rescue: false
+up_depth: 1
+down_depth: 1
+token_budget: 1500
