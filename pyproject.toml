@@ -13,7 +13,7 @@ authors = [{ name = "Matheus Borges" }]
 dependencies = []
 
 [project.optional-dependencies]
-tau = []
+tau = ["tau-ai==0.4.1"]
 
 [project.scripts]
 tau-intent = "tau_intent.cli:main"
