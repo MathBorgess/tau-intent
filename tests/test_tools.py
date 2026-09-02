@@ -38,3 +38,22 @@ class TestTools(unittest.TestCase):
         names_b = [t["name"] if isinstance(t, dict) else t.name for t in catalog(capture=True)]
         self.assertNotIn("record_intent", names_a)
         self.assertIn("record_intent", names_b)
+
+    def test_symbol_e_domain_sao_descritos_no_schema(self) -> None:
+        """The gate validates symbol structurally, so the tool has to ask for it."""
+        from tau_intent.tools import RECORD_INTENT_DESCRIPTION, RECORD_INTENT_SCHEMA
+
+        props = RECORD_INTENT_SCHEMA["parameters"] if "parameters" in RECORD_INTENT_SCHEMA else RECORD_INTENT_SCHEMA
+        props = props["properties"]
+        self.assertIn("description", props["symbol"])
+        self.assertIn("AST", props["symbol"]["description"])
+        self.assertIn("description", props["domain"])
+        self.assertIn("symbol", RECORD_INTENT_DESCRIPTION)
+
+    def test_record_intent_ainda_nao_exige_domain_no_schema(self) -> None:
+        """DOMINIO_AUSENTE is a gate code; making it required would turn an
+        omission into NAO_PARSEAVEL and collapse two codes into one."""
+        from tau_intent.tools import RECORD_INTENT_SCHEMA
+
+        self.assertEqual(RECORD_INTENT_SCHEMA["required"], ["file", "why"])
+

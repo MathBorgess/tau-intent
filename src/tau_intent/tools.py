@@ -73,11 +73,24 @@ BASH_SCHEMA: dict[str, Any] = {
 RECORD_INTENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "file": {"type": "string"},
-        "symbol": {"type": "string"},
-        "why": {"type": "string"},
-        "property": {"type": "string"},
-        "domain": {"type": "string"},
+        "file": {"type": "string", "description": "Path of the file this intent anchors to."},
+        "symbol": {
+            "type": "string",
+            "description": (
+                "Name of the def/class this increment lives in, exactly as written "
+                "in the file. This is the structural anchor: it is resolved against "
+                "the AST, and it survives a reformat that moves every line."
+            ),
+        },
+        "why": {"type": "string", "description": "Why this code exists this way."},
+        "property": {
+            "type": "string",
+            "description": "Pre/post-condition this increment assumes or establishes.",
+        },
+        "domain": {
+            "type": "string",
+            "description": "Domain concept this increment embodies. Required in practice.",
+        },
     },
     "required": ["file", "why"],
 }
@@ -106,6 +119,13 @@ BASH_DESCRIPTION = _origin_doc(
     "bash",
     "Execute a bash command in the current working directory. Returns stdout and stderr. "
     "Bash can write files; those regions still need intent.",
+)
+
+
+RECORD_INTENT_DESCRIPTION = (
+    "Registra a intenção deste incremento. Chame antes de encerrar o turno. "
+    "Preencha symbol com o nome do def/class editado (âncora estrutural, "
+    "validada contra o AST) e domain com o conceito de domínio."
 )
 
 
@@ -191,7 +211,7 @@ def tool_specs(*, capture: bool) -> list[dict[str, Any]]:
         specs.append(
             {
                 "name": "record_intent",
-                "description": "Registra a intenção deste incremento. Chame antes de encerrar o turno.",
+                "description": RECORD_INTENT_DESCRIPTION,
                 "parameters": RECORD_INTENT_SCHEMA,
                 "execute_fn": _record_intent_execute(),
             }
