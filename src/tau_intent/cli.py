@@ -19,8 +19,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Intent-history mechanism around tau. "
             "A: --no-capture --no-gate --no-project --no-serve; "
-            "B: --capture --gate --no-project --serve; "
-            "C: --capture --gate --project --serve. "
+            "B: --capture --gate --project --serve --no-llm-rescue; "
+            "C: --capture --gate --project --serve --llm-rescue. "
             "Owner sets temperature 0 on the provider they expose."
         ),
     )
@@ -28,6 +28,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gate", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--project", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--serve", action=argparse.BooleanOptionalAction, default=False)
+    # The four mechanism flags above are the ones AGENTS.md pins. --llm-rescue
+    # is not a fifth mechanism stage: it is arm C's single knob (H16/H17),
+    # read here and passed through to the projection config.
+    parser.add_argument(
+        "--llm-rescue",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Arm C only: summarise the selected block after the budget cut.",
+    )
     parser.add_argument("--workspace", type=Path, default=Path("."))
     parser.add_argument("--prompt", default="implement the task")
     parser.add_argument("--task-id", default="task")
@@ -54,13 +63,26 @@ def flags_from_args(args: argparse.Namespace | list[str] | None = None) -> Flags
     if not isinstance(args, argparse.Namespace):
         args = parse_args(args)
     capture, gate, project, serve = args.capture, args.gate, args.project, args.serve
+    rescue = getattr(args, "llm_rescue", None)
+    # H16: B and C both project. C is B plus llm_rescue, and that is the whole
+    # difference between them. The pre-H16 mapping (B served the entire current
+    # store with no budget) measured a design that was revoked (D1).
     if args.arm == "A":
         capture, gate, project, serve = False, False, False, False
+        rescue = False if rescue is None else rescue
     elif args.arm == "B":
-        capture, gate, project, serve = True, True, False, True
+        capture, gate, project, serve = True, True, True, True
+        rescue = False if rescue is None else rescue
     elif args.arm == "C":
         capture, gate, project, serve = True, True, True, True
-    return Flags(capture=capture, gate=gate, project=project, serve=serve)
+        rescue = True if rescue is None else rescue
+    return Flags(
+        capture=capture,
+        gate=gate,
+        project=project,
+        serve=serve,
+        llm_rescue=bool(rescue),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
