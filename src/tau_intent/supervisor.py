@@ -169,6 +169,14 @@ async def run_task(
     bloco_cfg = bloco_cfg or load_bloco_config()
     gate_fn = gate_fn or portao
 
+    if flags.llm_rescue and flags.serve and flags.project and summarizer_fn is None:
+        # Arm C without a summariser would run as arm B and say nothing. v1 has
+        # no live provider (tests carry no API key), so the caller supplies one.
+        raise RuntimeError(
+            "llm_rescue=on exige summarizer_fn: o braço C precisa de um provedor "
+            "declarado, e cair para o braço B em silêncio contamina o contraste"
+        )
+
     tools = catalog(capture=flags.capture)
     if harness is None:
         harness = FakeHarness(max_turns=None, tools=tools)

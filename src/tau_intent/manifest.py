@@ -9,6 +9,58 @@ from typing import Any
 
 from tau_intent import pin
 from tau_intent.config import config_hashes, load_bloco_config, load_gate_config
+from tau_intent.rescue import load_rescue_config
+
+
+def _rescue_entry() -> dict[str, Any]:
+    """The frozen description of the summariser (H16/H17).
+
+    Two hashes, not one: the YAML and the prompt file. A prompt outside the
+    hash is a prompt outside the freeze.
+    """
+    try:
+        cfg = load_rescue_config()
+    except Exception as exc:  # noqa: BLE001 - a broken config is data here
+        return {"erro": f"{type(exc).__name__}: {exc}"[:200]}
+    return {
+        "versao": cfg.versao,
+        "habilitado": cfg.habilitado,
+        "gatilho": cfg.gatilho,
+        "unidade": cfg.unidade,
+        "modelo_id": cfg.modelo_id,
+        "temperatura": cfg.temperatura,
+        "max_tokens_saida": cfg.max_tokens_saida,
+        "prompt_caminho": cfg.prompt_caminho,
+        "prompt_sha256": cfg.prompt_sha256(),
+        "preservar_obrigatorio": list(cfg.preservar_obrigatorio),
+        "falha_politica": cfg.falha_politica,
+        "timeout_s": cfg.timeout_s,
+    }
+
+
+def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    """Manifest of one run: the frozen config plus what actually went out.
+
+    Arm C is not reproducible from the YAML and the store alone — a model wrote
+    part of what was served. So the block that was actually served is recorded,
+    not only the hash of the prompt that asked for it (study note §3.7).
+    """
+    entry = manifest(flags=flags, **kwargs)
+    execucao = {
+        "tokens_served": telemetry.get("tokens_served"),
+        "recibo": telemetry.get("recibo"),
+        "bloco_posicao": telemetry.get("bloco_posicao"),
+        "cobertura_de_captura": telemetry.get("cobertura_de_captura"),
+        "latencia_de_captura": telemetry.get("latencia_de_captura"),
+        "aproveitamento_do_bloco": telemetry.get("aproveitamento_do_bloco"),
+        "productive_turns": telemetry.get("productive_turns"),
+        "block_turns": telemetry.get("block_turns"),
+    }
+    for campo, valor in telemetry.items():
+        if campo.startswith("llm_rescue"):
+            execucao[campo] = valor
+    entry["execucao"] = execucao
+    return entry
 
 
 def manifest(
@@ -42,11 +94,13 @@ def manifest(
             "sha256": pin.PINNED_SHA256,
             "git": pin.PINNED_GIT,
         },
+        "rescue": _rescue_entry(),
         "tokenizer": tokenizer,
         "temperatura_configurada": temperatura_configurada,
         "amostragem_conferida_no_fio": amostragem_conferida_no_fio,
     }
     if flags is not None:
+        entry["rescue"]["habilitado_na_execucao"] = bool(getattr(flags, "llm_rescue", False))
         entry["flags"] = {
             "capture": bool(getattr(flags, "capture", False)),
             "gate": bool(getattr(flags, "gate", False)),

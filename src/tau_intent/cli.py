@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     harness = None
     diff: str | None = None
     symbols: set[str] | None = None
+    summarizer = None
+    if flags.llm_rescue and args.fake_provider:
+        from tau_intent.rescue import sumarizador_falso
+
+        summarizer = sumarizador_falso()
     if args.fake_provider:
         from tau_intent.fake_provider import FakeHarness, passing_script
 
@@ -115,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             harness=harness,
             diff=diff,
             symbols=symbols,
+            summarizer_fn=summarizer,
         )
     )
     print(

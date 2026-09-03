@@ -25,8 +25,16 @@ GATE_YAML = CONFIG_DIR / "gate.yaml"
 BLOCO_YAML = CONFIG_DIR / "bloco.yaml"
 PROJECTION_YAML = CONFIG_DIR / "projection.yaml"
 
-#: Every file whose sha256 goes in the manifest. Order is stable.
-CONFIG_FILES = ("gate.yaml", "bloco.yaml", "projection.yaml")
+#: Every file whose sha256 goes in the manifest. Order is stable. The rescue
+#: prompt is in the list on purpose: a prompt outside the hash is a prompt
+#: outside the freeze.
+CONFIG_FILES = (
+    "gate.yaml",
+    "bloco.yaml",
+    "projection.yaml",
+    "rescue.yaml",
+    "prompts/rescue-v1.txt",
+)
 
 
 class ConfigError(ValueError):

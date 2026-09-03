@@ -187,14 +187,26 @@ def projetar(
     }
 
     if cfg.llm_rescue and summarizer_fn is not None and escolhidas:
-        bloco, resgate = _aplicar_rescue(bloco, escolhidas, recibo, summarizer_fn)
+        contexto = {
+            "estourou": bool(cortadas),
+            "cortadas": len(cortadas),
+            "tokens_selecionados": tokens_selecionados,
+            "recibo": recibo.as_dict(),
+        }
+        bloco, resgate = _aplicar_rescue(
+            bloco, escolhidas, recibo, summarizer_fn, contexto
+        )
         tel.update(resgate)
         tel["tokens_served"] = count_tokens(bloco)
     return bloco, tel
 
 
 def _aplicar_rescue(
-    bloco: str, escolhidas: Sequence[Any], recibo: Recibo, summarizer_fn: Any
+    bloco: str,
+    escolhidas: Sequence[Any],
+    recibo: Recibo,
+    summarizer_fn: Any,
+    contexto: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Hand the selected body to the summarizer. Envelope and receipt are ours.
 
@@ -203,33 +215,65 @@ def _aplicar_rescue(
     contaminates the contrast without showing up in the report.
     """
     corpo = "\n\n".join(render_entry(entry) for entry in escolhidas)
+    base: dict[str, Any] = {
+        "llm_rescue": True,
+        "llm_rescue_disparou": False,
+        "llm_rescue_aplicado": False,
+        "llm_rescue_falhou": False,
+        "llm_rescue_tokens_antes": count_tokens(bloco),
+        "llm_rescue_bloco_servido": bloco,
+    }
     try:
-        resumo = summarizer_fn(corpo)
-    except Exception as exc:  # noqa: BLE001 - failure mode is data, not a crash
+        resumo = summarizer_fn(corpo, contexto or {})
+    except Exception as exc:  # noqa: BLE001 - failure is data, not a crash
+        # Declared and deterministic: degrade to the selected block and say in
+        # the manifest that it fell. Silently becoming arm B is the worst
+        # outcome, because it contaminates the contrast without appearing.
         return bloco, {
-            "llm_rescue": True,
-            "llm_rescue_aplicado": False,
+            **base,
+            "llm_rescue_disparou": True,
             "llm_rescue_falhou": True,
             "llm_rescue_erro": f"{type(exc).__name__}: {exc}"[:200],
         }
-    texto = "" if resumo is None else str(getattr(resumo, "texto", resumo))
+    if resumo is None:
+        # Trigger policy said no (gatilho: ao_estourar with nothing cut). Not a
+        # failure: C is byte-for-byte B this session, and the frequency of that
+        # is what gets reported per arm.
+        return bloco, base
+    texto = str(getattr(resumo, "texto", resumo) or "")
     if not texto.strip():
         return bloco, {
-            "llm_rescue": True,
-            "llm_rescue_aplicado": False,
+            **base,
+            "llm_rescue_disparou": True,
             "llm_rescue_falhou": True,
             "llm_rescue_erro": "resposta vazia",
         }
+    novo = envelope(texto.strip(), recibo)
     tel: dict[str, Any] = {
-        "llm_rescue": True,
+        **base,
+        "llm_rescue_disparou": True,
         "llm_rescue_aplicado": True,
-        "llm_rescue_falhou": False,
+        "llm_rescue_tokens_depois": count_tokens(novo),
+        "llm_rescue_bloco_servido": novo,
     }
-    for campo in ("modelo", "prompt_sha256", "tokens_entrada", "tokens_saida", "amostragem"):
+    for campo in (
+        "modelo",
+        "prompt_sha256",
+        "tokens_entrada",
+        "tokens_saida",
+        "amostragem",
+        "chamadas",
+    ):
         valor = getattr(resumo, campo, None)
         if valor is not None:
             tel[f"llm_rescue_{campo}"] = valor
-    return envelope(texto.strip(), recibo), tel
+    try:
+        from tau_intent.rescue import recall_de_simbolo
+
+        tel["llm_rescue_recall_de_simbolo"] = recall_de_simbolo(bloco, novo)
+    except ImportError:  # pragma: no cover
+        pass
+    return novo, tel
 
 
 def _custo_do_envelope() -> int:
