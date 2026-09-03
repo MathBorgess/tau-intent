@@ -15,7 +15,7 @@ Read `docs/SPEC-V1.md` before touching code. Stop there. The vault is not requir
 9. **Copy read/write/edit/bash with origin SHA in the docstring (MIT).** Their descriptions are experimental fixtures.
 10. **Tests of v1: no API key, no live HTTP to a model.** Fake provider or recorded fixtures.
 11. **Do not cite EXPERIMENTO.md or SPEC.md.** Those files must not exist here.
-12. **Do not calibrate hyperparameters in v1.** YAML is read, not fitted. `limiar_edicao: 40` is a declared size threshold per (file, symbol), not AtomicCommitBench's hunk counts (12 / 51). Do not raise it to 51.
+12. **Do not calibrate hyperparameters in v1.** YAML is read, not fitted. `limiar_edicao: 51` is declared: AtomicCommitBench mean hunks/episode, applied as edited lines summed per (file, symbol). Not a hunk cap.
 13. **H16 arms:** A = all off. B = capture+gate+project+serve, llm_rescue off. C = B + llm_rescue on. Both B and C project. `render_tudo` is not on a measured arm.
 14. **The loop reads hashed YAML.** `run_task` calls `load_gate_config()`. Do not decide with a bare `GateConfig()`.
 

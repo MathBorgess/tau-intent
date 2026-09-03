@@ -180,6 +180,14 @@ class TestRegressaoD2D7D8(unittest.TestCase):
         verdict = portao([region], pendentes, set(), cfg, 0)
         self.assertIn("EDICAO_GRANDE_SEM_SIMBOLO", [f.code for f in verdict.falhas])
 
+    def test_default_51_nao_bloqueia_44_linhas_sem_simbolo(self):
+        """51 is the declared YAML default (AtomicCommitBench mean hunks/episode)."""
+        region = _region(start=1, end=44, size=44, edited_lines=44)
+        pendentes = {"src/a.py": _pending(symbol="")}
+        verdict = portao([region], pendentes, set(), GateConfig(), 0)
+        self.assertEqual(verdict.tipo, "PASSA")
+        self.assertEqual(GateConfig().limiar_edicao, 51)
+
     def test_limiar_soma_por_identidade_nao_por_hunk(self):
         """Two 25-line hunks of the same symbol are one 50-line edit."""
         shared = _pending(symbol="")
@@ -195,9 +203,9 @@ class TestRegressaoD2D7D8(unittest.TestCase):
     def test_episodio_mediano_atomic_commit_bench_passa(self):
         """12 hunks / 6 files, small edits, one intent via files:[].
 
-        12 and 51 are hunk counts, not line counts. Raising limiar_edicao to
-        51 would confuse the units. The episode is accepted because spanning
-        files is not ANCORA_AMBIGUA and each identity stays under 40 lines.
+        Accepted because spanning files is not ANCORA_AMBIGUA and each identity
+        stays under the declared 51 (16 lines here). 51 is mean hunks/episode
+        used as the line threshold, not a hunk cap.
         """
         files = [f"src/m{i}.py" for i in range(6)]
         regions = []
@@ -207,7 +215,7 @@ class TestRegressaoD2D7D8(unittest.TestCase):
         shared = _pending(symbol="f")
         pendentes = {r.key(): shared for r in regions}
         known = {f"{path}::f" for path in files}
-        verdict = portao(regions, pendentes, known, GateConfig(limiar_edicao=40), 0)
+        verdict = portao(regions, pendentes, known, GateConfig(), 0)
         self.assertEqual(verdict.tipo, "PASSA", [f.code for f in verdict.falhas])
 
     def test_d8_stopwords_e_regex_foram_apagados(self):

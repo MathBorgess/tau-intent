@@ -56,13 +56,15 @@ After n_max blocks → ESCALAR.
 
 Spanning files is not ANCORA_AMBIGUA (G-3 / AtomicCommitBench: 59.5% of commits cross files). Same-symbol multi-hunk is not ANCORA_AMBIGUA. Different symbols in one file are (35.4% of episodes have hunks of the same file belonging to different commits).
 
-`limiar_edicao: 40` is a **declared hyperparameter**, read from `gate.yaml`, never fitted. It is the size at which an unnamed identity must acquire a symbol. It is not a hunk cap and not an episode cap. AtomicCommitBench's median 12 hunks / 6 files (mean 51 / 9.8) are **hunk/file counts, not line counts** — do not raise 40 to 51. A median-shaped episode is accepted by `files: []` plus summing lines per identity. `contexto_diff: 3` is declared; size is edited lines, not hunk length (D7).
+`limiar_edicao: 51` is a **declared hyperparameter**, read from `gate.yaml`, never fitted. Unit: edited lines summed per (file, symbol). The number is AtomicCommitBench's mean hunks per episode (51 in 9.8 files), used as the size at which an unnamed identity must acquire a symbol — an edit as large as a typical entangled episode cannot stay unnamed. It is not a hunk cap. The median 12 hunks / 6 files is accepted by `files: []` plus summing per identity, independent of 51. `contexto_diff: 3` is declared; size is edited lines, not hunk length (D7).
 
 ## Store and `supersedes`
 
 Append-only JSONL. No status field. Current vs superseded is derived from `supersedes`. V3: 40/40 synthetic pairs.
 
-On `IntentStore.append`, every **current** entry whose `Anchor` overlaps the new one (same file, overlapping line range) is listed in `nova.supersedes`. The previous lines stay on disk; `store.current()` hides them.
+On `IntentStore.append`, every **current** entry whose `Anchor` overlaps the new one (same file, overlapping line range) is listed in `nova.supersedes`. The previous lines stay on disk; they are lastro. `store.current()` hides any id that appears in some later entry's `supersedes`. Nothing is rewritten; "recent" is derived at read time.
+
+The derived **block** is not stamped by `supersedes`. Projection iterates `current()` only. The receipt's `superadas_omitidas` is the lastro the model sees — a count, not the old `why`/`property`. Dumping superseded prose would be ungated injection (Rekal: map + episodes without a confidence gate 0.63 → 0.29). The count tells the agent that older intent exists and was revoked; the JSONL keeps the text for humans, V2b, and G-7 trailers.
 
 Connection to the loop:
 

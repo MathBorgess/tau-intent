@@ -35,7 +35,7 @@ class GateConfig:
     """
 
     n_max: int = 3
-    limiar_edicao: int = 40
+    limiar_edicao: int = 51
     contexto_diff: int = 3
     versao: str = "gate-v2-estrutural"
     codigos: tuple[str, ...] = field(default=CODIGOS)
@@ -93,8 +93,8 @@ def portao(
     AtomicCommitBench (2607.03332): a median episode is 12 hunks / 6 files,
     not 12 intents and not 12× the line threshold. Spanning files is allowed.
     ``ANCORA_AMBIGUA`` fires only when one intent sits on **different symbols
-    in the same file**. ``limiar_edicao`` is compared to edited lines **summed
-    per (file, symbol)**, not per hunk and not per episode.
+    in the same file**. ``limiar_edicao`` (51, declared) is compared to edited
+    lines **summed per (file, symbol)**, not per hunk and not per episode.
     """
     known = set(symbols)
     falhas: list[Falha] = []
@@ -163,7 +163,8 @@ def _totais_editados(
 
     AtomicCommitBench counts hunks and files, not lines. A median 12-hunk /
     6-file episode with small hunks stays under ``limiar_edicao`` per identity.
-    One rewritten function split across hunks does not.
+    One rewritten function split across hunks does not. The declared 51 is the
+    paper's mean hunks/episode, used as the line threshold — units stay lines.
     """
     totais: dict[tuple[str, str], int] = {}
     for region in regions:

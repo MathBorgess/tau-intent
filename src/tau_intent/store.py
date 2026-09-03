@@ -10,7 +10,16 @@ from tau_intent.model import Anchor, IntentEntry
 
 
 class IntentStore:
-    """Append-only. Current vs superseded is derived from ``supersedes``."""
+    """Append-only. Current vs superseded is derived from ``supersedes``.
+
+    The file never updates a past line. ``append`` writes a new object whose
+    ``supersedes`` lists the ids of **current** entries whose anchors overlap
+    (same file, overlapping lines). ``current()`` is every stored entry whose
+    id is not in that derived set. The recent block is therefore not a rewrite
+    of the JSONL: it is a read-time filter. The omitted lines remain lastro
+    on disk; the derived view serves ``current()`` and the receipt counts the
+    rest (``superadas_omitidas``), without injecting the old prose.
+    """
 
     def __init__(self, path: Path):
         path = Path(path)

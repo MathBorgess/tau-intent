@@ -7,7 +7,7 @@ touches the envelope, the position or the omission receipt.
 
 Every degree of freedom lives in ``rescue.yaml`` — trigger policy, unit,
 model id, sampling, prompt file, failure policy, telemetry switches. Nothing
-here is a constant in the code, which is the discipline ``limiar_edicao = 40``
+here is a constant in the code, which is the discipline ``limiar_edicao = 51``
 did not get.
 
 The prompt is a file on disk, versioned and hashed. Both hashes — the YAML's

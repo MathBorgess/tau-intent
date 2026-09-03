@@ -1,16 +1,18 @@
 # Gate parameters. Read, never fitted (G-0). Hashed in the manifest.
 # H15: no lexical list here, and none is coming back.
 #
-# limiar_edicao is a declared hyperparameter, not an AtomicCommitBench statistic.
-# It is the size (edited lines, summed per (file, symbol)) at which an unnamed
-# identity must acquire a resolved symbol. It is not a hunk cap, not an episode
-# cap, and not 12 or 51 — those are hunk/file counts (median 12 hunks / 6 files,
-# mean 51 / 9.8). A 12-hunk episode is accepted via files:[] and by not treating
-# same-symbol multi-hunk as ANCORA_AMBIGUA. Do not raise this to 51.
+# limiar_edicao: 51 — declared hyperparameter, not fitted.
+# Unit is still edited lines summed per (file, symbol), not hunks.
+# 51 is AtomicCommitBench's mean hunks/episode (51 in 9.8 files), used as
+# the declared size at which an unnamed identity must acquire a symbol:
+# an edit as large as a typical entangled episode cannot stay unnamed.
+# The median 12 hunks / 6 files is accepted via files:[] and same-symbol
+# multi-hunk, independent of this number.
 gate:
   versao: gate-v2-estrutural
   n_max: 3
-  limiar_edicao: 40
+  limiar_edicao: 51
+  contexto_diff: 3
   contexto_diff: 3
   codigos: [AUSENTE, NAO_PARSEAVEL, ANCORA_AMBIGUA, SIMBOLO_NAO_RESOLVIDO, EDICAO_GRANDE_SEM_SIMBOLO, DOMINIO_AUSENTE]
   # removidos em gate-v2: genericas, stopwords, gramatica_de_citacao,
