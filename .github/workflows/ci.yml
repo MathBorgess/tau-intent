@@ -20,3 +20,40 @@ jobs:
         run: PYTHONPATH=src python3 -m tau_intent.pin --check
         env:
           NO_NETWORK: "1"
+
+  bancada:
+    # B x C, arm C's block non-empty, and V4 refused without the V5 of the same
+    # sha256 (P-4). Runs on the fake provider: no API key, no live HTTP.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: bancada B x C
+        run: PYTHONPATH=src python3 -m unittest tests.test_integration_bench -v
+        env:
+          NO_NETWORK: "1"
+      - name: manifesto — sha256 dos YAML e do prompt do rescue
+        run: |
+          PYTHONPATH=src python3 - <<'PY'
+          from tau_intent.manifest import manifest
+          entry = manifest()
+          hashes = entry["config_sha256"]
+          faltando = [
+              nome
+              for nome in ("gate.yaml", "bloco.yaml", "projection.yaml",
+                           "rescue.yaml", "prompts/rescue-v1.txt")
+              if nome not in hashes
+          ]
+          assert not faltando, f"config sem sha256 no manifesto: {faltando}"
+          assert entry["rescue"]["prompt_sha256"] == hashes["prompts/rescue-v1.txt"]
+          print("manifesto ok:", " ".join(sorted(hashes)))
+          PY
+        env:
+          NO_NETWORK: "1"
+      - name: sem chave de API no CI
+        run: |
+          if [ -n "${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ]; then
+            echo "testes da v1 rodam sem chave" >&2; exit 1
+          fi

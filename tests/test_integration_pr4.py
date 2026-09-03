@@ -11,10 +11,7 @@ from tau_intent.cli import flags_from_args
 from tau_intent.fake_provider import FakeHarness, FakeTurnEnd, passing_script
 from tau_intent.supervisor import Flags, run_task
 
-try:
-    from tau_intent.gate import Veredito
-except ImportError:
-    from tau_intent._slice4_fallbacks import Veredito
+from tau_intent.gate import Veredito
 
 DIFF = (
     "diff --git a/src/mod.py b/src/mod.py\n"

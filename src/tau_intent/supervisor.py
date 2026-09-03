@@ -25,6 +25,7 @@ from tau_intent.collect import (
     Region,
     collect_events,
     regions_from_diff,
+    resolver_simbolos,
     simbolos_do_ast,
 )
 from tau_intent.config import BlocoConfig, load_bloco_config
@@ -182,8 +183,13 @@ async def run_task(
         harness = FakeHarness(max_turns=None, tools=tools)
     _assert_tau_max_turns_none(harness)
 
-    # Regions come first: they are the anchors of the derived view (D3).
-    regions = regions_from_diff(diff if diff is not None else git_diff(workspace))
+    # Regions come first: they are the anchors of the derived view (D3). Their
+    # symbols are resolved here, before serving, so the anchor is (file, symbol)
+    # and not merely the file — otherwise the projection loses the precision the
+    # graph has, at the one moment it matters.
+    regions = resolver_simbolos(
+        regions_from_diff(diff if diff is not None else git_diff(workspace)), workspace
+    )
 
     tel: dict[str, Any] = {"tokenizer": "whitespace-v1"}
     current_entries: list[Any] = []

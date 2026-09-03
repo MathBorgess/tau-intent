@@ -109,3 +109,27 @@ def manifest(
         }
         entry["catalogo_tem_record_intent"] = bool(getattr(flags, "capture", False))
     return entry
+
+
+class RelatoIncoerente(ValueError):
+    """V4 and V5 reported over configs that are not the same config."""
+
+
+def conferir_v4_v5(v4: dict[str, Any], v5: dict[str, Any] | None) -> None:
+    """P-4: V4 is the objective, V5 is the constraint, and they travel together.
+
+    Closing V4 by cutting everything is trivially possible, and it is exactly
+    what reporting V4 alone would hide. A report is refused when V5 is missing,
+    or when the two were produced over different config hashes.
+    """
+    if v5 is None:
+        raise RelatoIncoerente("V4 sem V5 do mesmo sha256: V4 é o objetivo, V5 é a restrição")
+    a = v4.get("config_sha256") or {}
+    b = v5.get("config_sha256") or {}
+    if not a or not b:
+        raise RelatoIncoerente("relato sem config_sha256 não é auditável")
+    if a != b:
+        diferentes = sorted(
+            nome for nome in set(a) | set(b) if a.get(nome) != b.get(nome)
+        )
+        raise RelatoIncoerente(f"V4 e V5 sobre YAML diferentes: {diferentes}")
