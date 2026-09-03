@@ -143,6 +143,7 @@ class TestEvidenciaEstrutural(unittest.TestCase):
         self.assertEqual(codes, ["AUSENTE"])
 
     def test_ancora_ambigua_com_fixture_multi_hunk(self):
+        """Two hunks of the same file without distinct AST symbols are one identity."""
         from tau_intent.gate import GateConfig, portao
 
         regions = regions_from_diff(self.MULTI_HUNK)
@@ -151,13 +152,41 @@ class TestEvidenciaEstrutural(unittest.TestCase):
             {"tool_name": "edit", "args": {
                 "path": "src/mod.py", "edits": [{"oldText": "y = 2", "newText": "y = 3"}]}},
             {"tool_name": "record_intent", "args": {
-                "file": "src/mod.py", "why": "duas coisas de uma vez",
-                "property": "f retorna int", "domain": "demo"}},
+                "file": "src/mod.py", "why": "duas hunks da mesma função",
+                "property": "f retorna int", "domain": "demo", "symbol": "f"}},
         ]
         pendentes = collect_events(events, regions)
         self.assertTrue(all(p.claimed_regions == 2 for p in pendentes.values()))
-        codes = {f.code for f in portao(regions, pendentes, set(), GateConfig(), 0).falhas}
-        self.assertIn("ANCORA_AMBIGUA", codes)
+        codes = {f.code for f in portao(regions, pendentes, {"src/mod.py::f"}, GateConfig(), 0).falhas}
+        self.assertNotIn("ANCORA_AMBIGUA", codes)
+
+    def test_files_atravessa_arquivos(self):
+        from tau_intent.gate import GateConfig, portao
+
+        diff = (
+            "diff --git a/src/a.py b/src/a.py\n"
+            "--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,1 +1,2 @@\n x\n+a\n"
+            "diff --git a/src/b.py b/src/b.py\n"
+            "--- a/src/b.py\n+++ b/src/b.py\n"
+            "@@ -1,1 +1,2 @@\n y\n+b\n"
+        )
+        regions = regions_from_diff(diff)
+        self.assertEqual({r.path for r in regions}, {"src/a.py", "src/b.py"})
+        events = [{"tool_name": "record_intent", "args": {
+            "files": ["src/a.py", "src/b.py"],
+            "why": "uma decisão, dois arquivos",
+            "property": "ambos expõem o recorte",
+            "domain": "demo",
+            "symbol": "f",
+        }}]
+        pendentes = collect_events(events, regions)
+        self.assertEqual({p.region.path for p in pendentes.values()}, {"src/a.py", "src/b.py"})
+        codes = {f.code for f in portao(
+            regions, pendentes, {"src/a.py::f", "src/b.py::f"}, GateConfig(), 0
+        ).falhas}
+        self.assertNotIn("ANCORA_AMBIGUA", codes)
+        self.assertNotIn("AUSENTE", codes)
 
     def test_dominio_ausente_e_dado_do_coletor(self):
         from tau_intent.gate import GateConfig, portao

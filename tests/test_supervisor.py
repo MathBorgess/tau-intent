@@ -217,6 +217,12 @@ class TestSupervisorCompat(unittest.TestCase):
         self.assertFalse((raiz / "_slice4_fallbacks.py").exists())
         self.assertFalse((raiz / "_pr4_local.py").exists())
 
+    def test_laco_le_o_yaml_do_portao(self) -> None:
+        """G-0: the hashed file is what run_task decides with, not GateConfig()."""
+        import tau_intent.supervisor as sup
+
+        self.assertIn("load_gate_config", inspect.getsource(sup.run_task))
+
 
 if __name__ == "__main__":
     unittest.main()

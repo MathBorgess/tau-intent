@@ -26,15 +26,15 @@ Exit code 0 on the suite means the mechanism **behaves as specified**, not that 
 
 ```
 A: capture=off gate=off project=off serve=off
-B: capture=on  gate=on  project=off serve=on
-C: capture=on  gate=on  project=on  serve=on
+B: capture=on  gate=on  project=on  serve=on   llm_rescue=off
+C: capture=on  gate=on  project=on  serve=on   llm_rescue=on
 ```
 
-A→B is a **package** (store + gate + one extra tool). The isolated piece is projection (B×C). Do not describe A as "nothing".
+A→B is a **package** (store + gate + extra tool + projected view). The isolated piece is `llm_rescue` (B×C). Do not describe A as "nothing". Do not describe B as serving the whole store.
 
 ## v1 scope
 
-See [`docs/SPEC-V1.md`](docs/SPEC-V1.md) and [`AGENTS.md`](AGENTS.md). Five PRs. No orchestrator adapter. No V5 labelled set. No live model in CI.
+See [`docs/SPEC-V1.md`](docs/SPEC-V1.md) and [`AGENTS.md`](AGENTS.md). v1 slices 1–5 are on main. v1.1 is the structural gate, `files: []`, H16, and the block contract. No orchestrator adapter. No V5 labelled set in this repo (`conferir_v4_v5` only refuses a V4 report without it). No live model in CI.
 
 Sampling note: in v1, the owner configures temperature=0 on the provider they expose.
 

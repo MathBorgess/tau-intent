@@ -184,6 +184,7 @@ def projetar(
         "llm_rescue": False,
         "repr": cfg.repr,
         "div": cfg.div,
+        "servidas": list(escolhidas),
     }
 
     if cfg.llm_rescue and summarizer_fn is not None and escolhidas:

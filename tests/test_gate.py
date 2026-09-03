@@ -77,12 +77,26 @@ class TestGate(unittest.TestCase):
         self.assertEqual([f.code for f in verdict.falhas], ["NAO_PARSEAVEL"])
 
     def test_ancora_ambigua_um_intent_duas_regioes(self):
+        """Same file, two AST symbols, one intent — the 35.4% case."""
         shared = _pending()
-        regions = [_region(start=1, end=3), _region(start=40, end=42)]
+        regions = [
+            _region(start=1, end=3, symbol="f"),
+            _region(start=40, end=42, symbol="g"),
+        ]
         pendentes = {"src/a.py": shared}
-        verdict = portao(regions, pendentes, {"src/a.py::f"}, GateConfig(), 0)
+        verdict = portao(regions, pendentes, {"src/a.py::f", "src/a.py::g"}, GateConfig(), 0)
         codes = [f.code for f in verdict.falhas]
         self.assertEqual(codes, ["ANCORA_AMBIGUA", "ANCORA_AMBIGUA"])
+
+    def test_multi_hunk_mesmo_simbolo_nao_e_ambiguo(self):
+        shared = _pending(symbol="f")
+        regions = [
+            _region(start=1, end=3, symbol="f"),
+            _region(start=40, end=42, symbol="f"),
+        ]
+        pendentes = {"src/a.py": shared}
+        verdict = portao(regions, pendentes, {"src/a.py::f"}, GateConfig(), 0)
+        self.assertEqual(verdict.tipo, "PASSA")
 
     def test_simbolo_nao_resolvido_usa_ast_nao_prosa(self):
         region = _region()
@@ -165,6 +179,36 @@ class TestRegressaoD2D7D8(unittest.TestCase):
         cfg = GateConfig(limiar_edicao=40, contexto_diff=3)
         verdict = portao([region], pendentes, set(), cfg, 0)
         self.assertIn("EDICAO_GRANDE_SEM_SIMBOLO", [f.code for f in verdict.falhas])
+
+    def test_limiar_soma_por_identidade_nao_por_hunk(self):
+        """Two 25-line hunks of the same symbol are one 50-line edit."""
+        shared = _pending(symbol="")
+        regions = [
+            _region(start=1, end=25, edited_lines=25, symbol="f"),
+            _region(start=40, end=64, edited_lines=25, symbol="f"),
+        ]
+        cfg = GateConfig(limiar_edicao=40, contexto_diff=3)
+        verdict = portao(regions, {r.key(): shared for r in regions}, set(), cfg, 0)
+        self.assertIn("EDICAO_GRANDE_SEM_SIMBOLO", [f.code for f in verdict.falhas])
+        self.assertTrue(any("50" in f.detail for f in verdict.falhas))
+
+    def test_episodio_mediano_atomic_commit_bench_passa(self):
+        """12 hunks / 6 files, small edits, one intent via files:[].
+
+        12 and 51 are hunk counts, not line counts. Raising limiar_edicao to
+        51 would confuse the units. The episode is accepted because spanning
+        files is not ANCORA_AMBIGUA and each identity stays under 40 lines.
+        """
+        files = [f"src/m{i}.py" for i in range(6)]
+        regions = []
+        for path in files:
+            regions.append(_region(path, 1, 8, edited_lines=8, symbol="f"))
+            regions.append(_region(path, 20, 27, edited_lines=8, symbol="f"))
+        shared = _pending(symbol="f")
+        pendentes = {r.key(): shared for r in regions}
+        known = {f"{path}::f" for path in files}
+        verdict = portao(regions, pendentes, known, GateConfig(limiar_edicao=40), 0)
+        self.assertEqual(verdict.tipo, "PASSA", [f.code for f in verdict.falhas])
 
     def test_d8_stopwords_e_regex_foram_apagados(self):
         """Not disabled — deleted. Checked on the AST, so a docstring mentioning

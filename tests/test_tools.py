@@ -50,10 +50,10 @@ class TestTools(unittest.TestCase):
         self.assertIn("description", props["domain"])
         self.assertIn("symbol", RECORD_INTENT_DESCRIPTION)
 
-    def test_record_intent_ainda_nao_exige_domain_no_schema(self) -> None:
-        """DOMINIO_AUSENTE is a gate code; making it required would turn an
-        omission into NAO_PARSEAVEL and collapse two codes into one."""
+    def test_record_intent_exige_why_e_algum_arquivo(self) -> None:
+        """file or files, plus why. domain stays a gate code, not schema-required."""
         from tau_intent.tools import RECORD_INTENT_SCHEMA
 
-        self.assertEqual(RECORD_INTENT_SCHEMA["required"], ["file", "why"])
+        self.assertEqual(RECORD_INTENT_SCHEMA["required"], ["why"])
+        self.assertIn("files", RECORD_INTENT_SCHEMA["properties"])
 

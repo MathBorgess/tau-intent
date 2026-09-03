@@ -85,14 +85,20 @@ def portao(
 
     ``AUSENTE``                   diff x collector: region with no intent
     ``NAO_PARSEAVEL``             tool-call JSON: ``_raw_arguments`` / schema refused
-    ``ANCORA_AMBIGUA``            one intent claimed by N regions of the file
+    ``ANCORA_AMBIGUA``            one intent on two+ AST symbols in the same file
     ``SIMBOLO_NAO_RESOLVIDO``     AST: ``symbol`` set but not resolvable in ``file``
-    ``EDICAO_GRANDE_SEM_SIMBOLO`` diff + AST: big edit with no resolved symbol
+    ``EDICAO_GRANDE_SEM_SIMBOLO`` diff + AST: identity over limiar, no resolved symbol
     ``DOMINIO_AUSENTE``           schema: ``domain`` empty (presence, not semantics)
+
+    AtomicCommitBench (2607.03332): a median episode is 12 hunks / 6 files,
+    not 12 intents and not 12× the line threshold. Spanning files is allowed.
+    ``ANCORA_AMBIGUA`` fires only when one intent sits on **different symbols
+    in the same file**. ``limiar_edicao`` is compared to edited lines **summed
+    per (file, symbol)**, not per hunk and not per episode.
     """
     known = set(symbols)
     falhas: list[Falha] = []
-    claims = _claim_counts(regions, pendentes)
+    totais = _totais_editados(regions, cfg)
 
     for region in regions:
         pending = _lookup(pendentes, region)
@@ -106,12 +112,13 @@ def portao(
             falhas.append(Falha("AUSENTE", region))
             continue
 
-        if _claim_count(claims, pending, region) > 1:
+        rivais = _simbolos_do_mesmo_arquivo(region, regions, pendentes)
+        if len(rivais) > 1:
             falhas.append(
                 Falha(
                     "ANCORA_AMBIGUA",
                     region,
-                    f"{_claim_count(claims, pending, region)} regiões de {_region_path(region)}",
+                    f"{sorted(rivais)} em {_region_path(region)}",
                 )
             )
 
@@ -120,12 +127,13 @@ def portao(
         if symbol and not resolvido:
             falhas.append(Falha("SIMBOLO_NAO_RESOLVIDO", region, symbol))
 
-        if _region_size(region, cfg) > cfg.limiar_edicao and not resolvido:
+        total = totais[_chave_edicao(region)]
+        if total > cfg.limiar_edicao and not resolvido:
             falhas.append(
                 Falha(
                     "EDICAO_GRANDE_SEM_SIMBOLO",
                     region,
-                    f"{_region_size(region, cfg)} linhas editadas",
+                    f"{total} linhas editadas",
                 )
             )
 
@@ -143,27 +151,61 @@ avaliar = portao
 evaluate_gate = portao
 
 
-def _claim_counts(
-    regions: Sequence[object], pendentes: Mapping[object, object]
-) -> dict[int, set[tuple[str, int, int]]]:
-    """How many distinct regions each pending object is claimed by (G-2)."""
-    counts: dict[int, set[tuple[str, int, int]]] = {}
+def _chave_edicao(region: object) -> tuple[str, str]:
+    """Identity the line threshold is measured against: (file, AST symbol)."""
+    return _region_path(region), _region_symbol(region)
+
+
+def _totais_editados(
+    regions: Sequence[object], cfg: GateConfig
+) -> dict[tuple[str, str], int]:
+    """Sum edited lines per (file, symbol). Twelve 8-line hunks of ``f`` are 96.
+
+    AtomicCommitBench counts hunks and files, not lines. A median 12-hunk /
+    6-file episode with small hunks stays under ``limiar_edicao`` per identity.
+    One rewritten function split across hunks does not.
+    """
+    totais: dict[tuple[str, str], int] = {}
     for region in regions:
-        pending = _lookup(pendentes, region)
-        if pending is None:
+        key = _chave_edicao(region)
+        totais[key] = totais.get(key, 0) + _region_size(region, cfg)
+    return totais
+
+
+def _simbolos_do_mesmo_arquivo(
+    region: object,
+    regions: Sequence[object],
+    pendentes: Mapping[object, object],
+) -> set[str]:
+    """AST symbols of this file attached to the same pending intent.
+
+    Empty (unresolved) does not count: multi-hunk of an unnamed file is one
+    identity, sized by the sum. Two resolved names in the same file are the
+    35.4% AtomicCommitBench case — hunks that belong to different commits.
+    Spanning files never enters this set.
+    """
+    pending = _lookup(pendentes, region)
+    if pending is None:
+        return set()
+    path = _region_path(region)
+    named: set[str] = set()
+    for other in regions:
+        if _region_path(other) != path:
             continue
-        counts.setdefault(id(pending), set()).add(_region_key(region))
-    return counts
+        other_pending = _lookup(pendentes, other)
+        if other_pending is None or id(other_pending) != id(pending):
+            continue
+        symbol = _region_symbol(other)
+        if symbol:
+            named.add(symbol)
+    return named
 
 
-def _claim_count(
-    claims: Mapping[int, set[tuple[str, int, int]]], pending: object, region: object
-) -> int:
-    declared = getattr(pending, "claimed_regions", None)
-    if isinstance(declared, int) and declared > 0:
-        return declared
-    del region
-    return len(claims.get(id(pending), ()))
+def _region_symbol(region: object) -> str:
+    value = getattr(region, "symbol", None)
+    if value is None and isinstance(region, dict):
+        value = region.get("symbol")
+    return str(value or "")
 
 
 def _lookup(pendentes: Mapping[object, object], region: object) -> object | None:

@@ -74,25 +74,35 @@ RECORD_INTENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "file": {"type": "string", "description": "Path of the file this intent anchors to."},
+        "files": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "All files this increment spans. Use when one decision crosses "
+                "files (AtomicCommitBench: 59.5% of commits). file still works "
+                "for the single-file case; either file or files is required."
+            ),
+        },
         "symbol": {
             "type": "string",
             "description": (
                 "Name of the def/class this increment lives in, exactly as written "
                 "in the file. This is the structural anchor: it is resolved against "
-                "the AST, and it survives a reformat that moves every line."
+                "the AST, and it survives a reformat that moves every line. For a "
+                "multi-file intent, name the symbol in the primary file; each file's "
+                "hunks keep their own AST identity."
             ),
         },
         "why": {"type": "string", "description": "Why this code exists this way."},
         "property": {
-            "type": "string",
-            "description": "Pre/post-condition this increment assumes or establishes.",
+            "type": "string", "description": "Pre/post-condition this increment assumes or establishes.",
         },
         "domain": {
             "type": "string",
             "description": "Domain concept this increment embodies. Required in practice.",
         },
     },
-    "required": ["file", "why"],
+    "required": ["why"],
 }
 
 
@@ -125,24 +135,31 @@ BASH_DESCRIPTION = _origin_doc(
 RECORD_INTENT_DESCRIPTION = (
     "Registra a intenção deste incremento. Chame antes de encerrar o turno. "
     "Preencha symbol com o nome do def/class editado (âncora estrutural, "
-    "validada contra o AST) e domain com o conceito de domínio."
+    "validada contra o AST) e domain com o conceito de domínio. "
+    "Se a decisão atravessa arquivos, passe files: [..] — um intent, vários arquivos."
 )
 
 
 async def record_intent(
-    file: str,
+    file: str = "",
     symbol: str = "",
     why: str = "",
     property: str = "",
     domain: str = "",
+    files: list[str] | None = None,
 ) -> dict[str, Any]:
     """Registra a intenção deste incremento. Chame antes de encerrar o turno.
 
     why:      por que este código existe deste jeito
     property: pré/pós-condição que ele assume — cite símbolos que existem
     domain:   que conceito do domínio ele encarna
+    files:    arquivos que a decisão atravessa; file continua válido sozinho
     """
-    return {"ok": True, "anchor": f"{file}::{symbol}" if symbol else file}
+    ancoras = list(files or [])
+    if file and file not in ancoras:
+        ancoras.insert(0, file)
+    primaria = ancoras[0] if ancoras else file
+    return {"ok": True, "anchor": f"{primaria}::{symbol}" if symbol else primaria or ",".join(ancoras)}
 
 
 def _stub_execute(name: str) -> Callable[..., Any]:
@@ -174,6 +191,7 @@ def _record_intent_execute():
             why=str(arguments.get("why") or ""),
             property=str(arguments.get("property") or ""),
             domain=str(arguments.get("domain") or ""),
+            files=list(arguments["files"]) if isinstance(arguments.get("files"), list) else None,
         )
 
     return execute

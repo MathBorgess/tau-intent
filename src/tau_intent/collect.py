@@ -3,7 +3,8 @@
 The collector is where the evidence the gate needs is produced (G-2, G-3).
 Three things it used to compute and throw away are now exposed:
 ``Pending.unparseable`` (V6, feeds NAO_PARSEAVEL), ``Pending.claimed_regions``
-(one intent claimed by N regions, feeds ANCORA_AMBIGUA) and ``Pending.domain``
+(one intent claimed by N regions; ANCORA_AMBIGUA only if those regions
+resolve to different AST symbols in the same file) and ``Pending.domain``
 (feeds DOMINIO_AUSENTE). Two things it never computed are now produced:
 ``Region.edited_lines`` — added/changed lines, not hunk length (D7) — and
 ``Region.symbol``, the enclosing definition resolved from the AST, which is
@@ -203,18 +204,24 @@ def collect_events(
         name = _tool_name(event)
         args, raw, unparseable = _tool_args(event)
         if name in WRITE_TOOLS or name == INTENT_TOOL or name == BASH_TOOL:
-            path = _path_from_args(name, args)
-            if unparseable or not path:
+            paths = _paths_from_args(name, args)
+            if unparseable or not paths:
                 unparseable = True
-            matched = (
-                _match_regions(by_path, path)
-                if path
-                else [region for group in by_path.values() for region in group]
-            )
-            if not matched and path:
-                region = Region(path=path, line_start=0, line_end=0)
-                matched = [region]
-                by_path.setdefault(path, []).append(region)
+            matched: list[Region] = []
+            seen: set[tuple[str, int, int]] = set()
+            for path in paths:
+                for region in _match_regions(by_path, path):
+                    key = region.key()
+                    if key not in seen:
+                        seen.add(key)
+                        matched.append(region)
+            if not matched and paths:
+                for path in paths:
+                    region = Region(path=path, line_start=0, line_end=0)
+                    matched.append(region)
+                    by_path.setdefault(path, []).append(region)
+            elif not matched and not paths:
+                matched = [region for group in by_path.values() for region in group]
             for region in matched:
                 pending = pendentes.setdefault(region.key(), Pending(region=region))
                 pending.trigger_log.append(name)
@@ -226,8 +233,9 @@ def collect_events(
                     pending.property = str(args.get("property") or pending.property)
                     pending.domain = str(args.get("domain") or pending.domain)
                     pending.symbol = str(args.get("symbol") or pending.symbol)
-                    # One record_intent covering N regions of the file is the
-                    # ambiguous-anchor case (G-2), not N independent intents.
+                    # One call may cover N regions (span files, or multi-hunk
+                    # of one symbol). Ambiguity is decided by the gate from
+                    # AST identities, not from this count.
                     pending.claimed_regions = max(len(matched), 1)
                     if pending.intent_turn is None:
                         pending.intent_turn = ordinal
@@ -291,20 +299,31 @@ def _schema_ok(name: str, args: Mapping[str, Any]) -> bool:
             if not isinstance(edit, dict) or "oldText" not in edit or "newText" not in edit:
                 return False
     if name == INTENT_TOOL:
-        return "file" in args and "why" in args
+        has_files = isinstance(args.get("files"), list) and any(args.get("files") or [])
+        has_file = bool(args.get("file") or args.get("path"))
+        return bool(has_file or has_files) and "why" in args
     if name == BASH_TOOL:
         return "command" in args
     return True
 
 
-def _path_from_args(name: str, args: Mapping[str, Any]) -> str:
+def _paths_from_args(name: str, args: Mapping[str, Any]) -> list[str]:
+    """Paths this event claims. ``record_intent`` may span files (G-3)."""
     if name == INTENT_TOOL:
-        return str(args.get("file") or args.get("path") or "")
+        paths: list[str] = []
+        files = args.get("files")
+        if isinstance(files, list):
+            paths.extend(str(item) for item in files if item)
+        one = str(args.get("file") or args.get("path") or "")
+        if one and one not in paths:
+            paths.insert(0, one)
+        return paths
     if name == BASH_TOOL:
         command = str(args.get("command") or "")
         found = _REDIRECT.findall(command)
-        return found[0] if found else ""
-    return str(args.get("path") or "")
+        return [found[0]] if found else []
+    path = str(args.get("path") or "")
+    return [path] if path else []
 
 
 def _apply_edit_size(pending: Pending, args: Mapping[str, Any]) -> None:

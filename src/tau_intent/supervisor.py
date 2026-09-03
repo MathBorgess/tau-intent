@@ -28,7 +28,7 @@ from tau_intent.collect import (
     resolver_simbolos,
     simbolos_do_ast,
 )
-from tau_intent.config import BlocoConfig, load_bloco_config
+from tau_intent.config import BlocoConfig, load_bloco_config, load_gate_config
 from tau_intent.fake_provider import FakeHarness
 from tau_intent.gate import GateConfig, Veredito, portao
 from tau_intent.model import Anchor, IntentEntry
@@ -166,7 +166,7 @@ async def run_task(
     workspace = Path(workspace)
     intents_path = workspace / "intents.jsonl"
     before_lines = _line_count(intents_path)
-    gate_cfg = gate_cfg or GateConfig()
+    gate_cfg = gate_cfg or load_gate_config()
     bloco_cfg = bloco_cfg or load_bloco_config()
     gate_fn = gate_fn or portao
 
@@ -199,6 +199,7 @@ async def run_task(
         current_entries = list(store.current())
 
     bloco = ""
+    servidas: list[Any] = []
     if flags.serve and not flags.project:
         # Under H16 no measured arm serves the whole store: render_tudo left
         # the arms (D1). The flag combination still parses, and it serves
@@ -215,6 +216,7 @@ async def run_task(
             _superadas(store, current_entries),
             summarizer_fn,
         )
+        servidas = list(proj_tel.pop("servidas", []))
         tel.update(proj_tel)
         tel.setdefault("tokens_served", count_tokens(bloco))
     tel["bloco_vazio"] = not bloco.strip()
@@ -273,7 +275,7 @@ async def run_task(
     tel["cobertura_de_captura"] = cobertura_de_captura(regions, depois)
     tel["cobertura_efetiva"] = tel["cobertura_de_captura"]
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
-    tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(current_entries, regions)
+    tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
     tel["block_turns"] = blocks
     tel["max_turns_on_tau"] = None

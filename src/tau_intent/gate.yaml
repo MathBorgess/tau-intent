@@ -1,5 +1,12 @@
 # Gate parameters. Read, never fitted (G-0). Hashed in the manifest.
 # H15: no lexical list here, and none is coming back.
+#
+# limiar_edicao is a declared hyperparameter, not an AtomicCommitBench statistic.
+# It is the size (edited lines, summed per (file, symbol)) at which an unnamed
+# identity must acquire a resolved symbol. It is not a hunk cap, not an episode
+# cap, and not 12 or 51 — those are hunk/file counts (median 12 hunks / 6 files,
+# mean 51 / 9.8). A 12-hunk episode is accepted via files:[] and by not treating
+# same-symbol multi-hunk as ANCORA_AMBIGUA. Do not raise this to 51.
 gate:
   versao: gate-v2-estrutural
   n_max: 3
