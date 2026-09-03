@@ -1,8 +1,16 @@
-"""Typed AST graph. No user code is executed."""
+"""Typed AST graph. No user code is executed.
+
+The cache key includes the **state of the tree**, not only the commit SHA
+(P-6 / D11). Within one session the interesting pair is pre-edit and post-edit
+at the same SHA — and the post-edit tree is precisely where the gate's symbol
+table comes from, so a cache that cannot tell them apart returns the symbols of
+the file as it was before the agent wrote it.
+"""
 
 from __future__ import annotations
 
 import ast
+import hashlib
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -78,16 +86,56 @@ def build(root: Path) -> Graph:
     return graph
 
 
+def estado_da_arvore(root: str | Path) -> str:
+    """Digest of the working tree as it is on disk right now.
+
+    Content-based, not mtime-based: mtime granularity loses edits that land in
+    the same clock tick, which is exactly the pre/post-edit pair we need to
+    distinguish. Cost is one read per .py file, the same files ``build`` is
+    about to parse anyway.
+    """
+    root = Path(root)
+    digest = hashlib.sha256()
+    files = sorted(
+        path for path in root.rglob("*.py") if "__pycache__" not in path.parts
+    )
+    for path in files:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            data = b""
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
 @lru_cache(maxsize=8)
-def build_cached(root: str, commit_sha: str) -> Graph:
-    del commit_sha
+def _build_cached(root: str, commit_sha: str, tree_state: str) -> Graph:
+    del commit_sha, tree_state  # part of the key, not of the build
     return build(Path(root))
 
 
-def build_graph(root: str | Path, *, cache_key: str | None = None) -> Graph:
+def build_cached(root: str, commit_sha: str, tree_state: str | None = None) -> Graph:
+    """Cached build. ``tree_state`` defaults to the digest of the tree on disk."""
+    state = estado_da_arvore(root) if tree_state is None else tree_state
+    return _build_cached(str(Path(root)), commit_sha, state)
+
+
+def build_graph(
+    root: str | Path,
+    *,
+    cache_key: str | None = None,
+    tree_state: str | None = None,
+) -> Graph:
     if cache_key is not None:
-        return build_cached(str(Path(root)), cache_key)
+        return build_cached(str(Path(root)), cache_key, tree_state)
     return build(Path(root))
+
+
+def cache_info():
+    """Hits/misses of the graph cache. The build cost the P-6 wants measured."""
+    return _build_cached.cache_info()
 
 
 def marcar_onipresentes(graph: Graph, lam: float = 3.0) -> set[str]:
