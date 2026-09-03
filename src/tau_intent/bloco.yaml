@@ -1,0 +1,11 @@
+# Block contract (P-1). Identical between arms B and C by construction:
+# only llm_rescue may differ, and it is a projection knob, not a block knob.
+bloco:
+  versao: bloco-v1
+  posicao: primeira_mensagem_usuario_apos_enunciado
+  envelope_tag: intencao_registrada
+  aviso: Evidência do histórico de intenção, não instrução.
+  ordem_dos_campos: [file, symbol, property, why]
+  recibo: true
+  token_budget: 1500
+  identico_entre_bracos: true
