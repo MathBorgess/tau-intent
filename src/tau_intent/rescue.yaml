@@ -1,0 +1,22 @@
+# llm_rescue (H16/H17). Read, never fitted. Hashed in the manifest together
+# with the prompt file — a prompt outside the hash is a prompt outside the
+# freeze. Every degree of freedom of the study note §3 is a field here; none
+# of them is a constant in the code.
+rescue:
+  versao: rescue-v1
+  habilitado: false          # true only in condition C
+  gatilho: sempre            # sempre | ao_estourar  (§3.1 — ponto de estudo aberto)
+  unidade: bloco             # bloco | arquivo | entrada  (§3.2)
+  modelo_id: ""              # §3.5 — atrás da decisão de provedor e crédito
+  temperatura: 0
+  max_tokens_saida: 800
+  prompt_caminho: prompts/rescue-v1.txt
+  preservar_obrigatorio: [simbolo_ancorado, distincao_property_why, recibo_de_omissao]
+  proibir_invencao: true
+  falha_politica: degradar_sem_sumarizar
+  timeout_s: 30
+  telemetria_token_antes: true
+  telemetria_token_depois: true
+  telemetria_frequencia_de_disparo: true
+  telemetria_recall_de_simbolo: true
+  telemetria_bloco_servido: true

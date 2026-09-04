@@ -1,0 +1,19 @@
+# Gate parameters. Read, never fitted (G-0). Hashed in the manifest.
+# H15: no lexical list here, and none is coming back.
+#
+# limiar_edicao: 51 — declared hyperparameter, not fitted.
+# Unit is still edited lines summed per (file, symbol), not hunks.
+# 51 is AtomicCommitBench's mean hunks/episode (51 in 9.8 files), used as
+# the declared size at which an unnamed identity must acquire a symbol:
+# an edit as large as a typical entangled episode cannot stay unnamed.
+# The median 12 hunks / 6 files is accepted via files:[] and per-identity
+# summing, independent of this number. One why may span several AST symbols
+# in the same file; grouping is authorship, not a gate code.
+gate:
+  versao: gate-v2-estrutural
+  n_max: 3
+  limiar_edicao: 51
+  contexto_diff: 3
+  codigos: [AUSENTE, NAO_PARSEAVEL, SIMBOLO_NAO_RESOLVIDO, EDICAO_GRANDE_SEM_SIMBOLO, DOMINIO_AUSENTE]
+  # removidos em gate-v2: genericas, stopwords, gramatica_de_citacao,
+  # GENERICA, PROPERTY_SEM_SIMBOLO, EDICAO_GRANDE_SEM_PROPERTY, ANCORA_AMBIGUA

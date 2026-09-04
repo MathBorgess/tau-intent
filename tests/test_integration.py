@@ -14,10 +14,7 @@ from tau_intent.fake_provider import (
 from tau_intent.supervisor import Flags, run_task
 from tau_intent.telemetry import TOKENIZER, count_tokens
 
-try:
-    from tau_intent.gate import GateConfig, Veredito
-except ImportError:
-    from tau_intent._slice4_fallbacks import GateConfig, Veredito
+from tau_intent.gate import GateConfig, Veredito
 
 
 DIFF = (
@@ -34,11 +31,15 @@ class TestCliFlags(unittest.TestCase):
     def test_four_independent_flags(self):
         parser = build_parser()
         a = flags_from_args(parser.parse_args(["--no-capture", "--no-gate", "--no-project", "--no-serve"]))
-        b = flags_from_args(parser.parse_args(["--capture", "--gate", "--no-project", "--serve"]))
-        c = flags_from_args(parser.parse_args(["--capture", "--gate", "--project", "--serve"]))
+        b = flags_from_args(parser.parse_args(["--capture", "--gate", "--project", "--serve"]))
+        c = flags_from_args(parser.parse_args(
+            ["--capture", "--gate", "--project", "--serve", "--llm-rescue"]))
         self.assertEqual((a.capture, a.gate, a.project, a.serve), (False, False, False, False))
-        self.assertEqual((b.capture, b.gate, b.project, b.serve), (True, True, False, True))
+        # H16: B and C both project; llm_rescue is the whole difference.
+        self.assertEqual((b.capture, b.gate, b.project, b.serve), (True, True, True, True))
         self.assertEqual((c.capture, c.gate, c.project, c.serve), (True, True, True, True))
+        self.assertFalse(b.llm_rescue)
+        self.assertTrue(c.llm_rescue)
         self.assertTrue(any(action.dest == "serve" for action in parser._actions))
 
     def test_no_arm_branch_outside_flag_reading(self):
@@ -67,13 +68,14 @@ class TestIntegrationFakeProvider(unittest.TestCase):
             self.assertEqual(result.block_turns, 0)
 
     def test_arm_b_appends_after_successful_gate(self):
+        # Arm B under H16: capture + gate + projected view, llm_rescue off.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             harness = FakeHarness(passing_script(), max_turns=None)
             result = asyncio.run(
                 run_task(
                     root,
-                    Flags(capture=True, gate=True, project=False, serve=True),
+                    Flags(capture=True, gate=True, project=True, serve=True),
                     harness=harness,
                     diff=DIFF,
                     symbols={"f", "int"},

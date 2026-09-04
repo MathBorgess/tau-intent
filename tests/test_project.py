@@ -109,6 +109,38 @@ class TestGraphAndProject(unittest.TestCase):
             for earlier, later in zip(served, served[1:]):
                 self.assertGreaterEqual(earlier, later)
 
+    def test_mesmo_why_property_diferente_nao_colapsa(self):
+        """Same subject, different contract: both entries stay in the block."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._repo(root)
+            graph = build(root)
+            cfg = load_project_config()
+            why = "feat: recorte com helper extraído"
+            entries = [
+                _Entry(
+                    id="e-target",
+                    ts="2026-09-04T00:00:00Z",
+                    anchor=_Anchor(file="pkg/core.py", symbol="target"),
+                    why=why,
+                    property="target retorna int",
+                ),
+                _Entry(
+                    id="e-helper",
+                    ts="2026-09-04T00:00:00Z",
+                    anchor=_Anchor(file="pkg/core.py", symbol="helper"),
+                    why=why,
+                    property="helper é puro",
+                ),
+            ]
+            bloco, tel = projetar(
+                graph, entries, ["pkg/core.py"], cfg, orcamento_token=10_000
+            )
+        self.assertEqual(bloco.count(why), 2)
+        self.assertIn("target retorna int", bloco)
+        self.assertIn("helper é puro", bloco)
+        self.assertEqual(tel["n_escolhidas"], 2)
+
     def test_yaml_is_read_not_fitted(self):
         cfg = load_project_config()
         self.assertEqual(cfg.max_nodes, 200)
