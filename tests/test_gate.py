@@ -48,7 +48,6 @@ class TestGate(unittest.TestCase):
             {
                 "AUSENTE",
                 "NAO_PARSEAVEL",
-                "ANCORA_AMBIGUA",
                 "SIMBOLO_NAO_RESOLVIDO",
                 "EDICAO_GRANDE_SEM_SIMBOLO",
                 "DOMINIO_AUSENTE",
@@ -76,8 +75,9 @@ class TestGate(unittest.TestCase):
         verdict = portao([region], pendentes, set(), GateConfig(), 0)
         self.assertEqual([f.code for f in verdict.falhas], ["NAO_PARSEAVEL"])
 
-    def test_ancora_ambigua_um_intent_duas_regioes(self):
-        """Same file, two AST symbols, one intent — the 35.4% case."""
+    def test_um_intent_dois_simbolos_no_mesmo_arquivo_passa(self):
+        """One why may span several defs in the same file. Grouping is authorship
+        (the why, including any label such as fix/refactor), not AST identity."""
         shared = _pending()
         regions = [
             _region(start=1, end=3, symbol="f"),
@@ -85,8 +85,8 @@ class TestGate(unittest.TestCase):
         ]
         pendentes = {"src/a.py": shared}
         verdict = portao(regions, pendentes, {"src/a.py::f", "src/a.py::g"}, GateConfig(), 0)
-        codes = [f.code for f in verdict.falhas]
-        self.assertEqual(codes, ["ANCORA_AMBIGUA", "ANCORA_AMBIGUA"])
+        self.assertEqual(verdict.tipo, "PASSA")
+        self.assertNotIn("ANCORA_AMBIGUA", CODIGOS)
 
     def test_multi_hunk_mesmo_simbolo_nao_e_ambiguo(self):
         shared = _pending(symbol="f")
@@ -203,9 +203,9 @@ class TestRegressaoD2D7D8(unittest.TestCase):
     def test_episodio_mediano_atomic_commit_bench_passa(self):
         """12 hunks / 6 files, small edits, one intent via files:[].
 
-        Accepted because spanning files is not ANCORA_AMBIGUA and each identity
-        stays under the declared 51 (16 lines here). 51 is mean hunks/episode
-        used as the line threshold, not a hunk cap.
+        Accepted because one intent may span files and each identity stays
+        under the declared 51 (16 lines here). 51 is mean hunks/episode used
+        as the line threshold, not a hunk cap.
         """
         files = [f"src/m{i}.py" for i in range(6)]
         regions = []
@@ -225,7 +225,13 @@ class TestRegressaoD2D7D8(unittest.TestCase):
 
         import tau_intent.gate as gate_mod
 
-        for morto in ("GENERICAS", "_STOP", "_cited_symbols", "GENERICA"):
+        for morto in (
+            "GENERICAS",
+            "_STOP",
+            "_cited_symbols",
+            "GENERICA",
+            "_simbolos_do_mesmo_arquivo",
+        ):
             self.assertFalse(hasattr(gate_mod, morto), f"ressuscitado: {morto}")
 
         tree = ast.parse(inspect.getsource(gate_mod))
@@ -241,7 +247,14 @@ class TestRegressaoD2D7D8(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom):
                 self.assertNotEqual(node.module, "re", "regex de volta no portão")
         self.assertFalse(
-            nomes & {"GENERICAS", "_STOP", "_cited_symbols", "GENERICA"},
+            nomes
+            & {
+                "GENERICAS",
+                "_STOP",
+                "_cited_symbols",
+                "GENERICA",
+                "_simbolos_do_mesmo_arquivo",
+            },
             f"caminho lexical ressuscitado: {nomes}",
         )
 

@@ -358,10 +358,11 @@ def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path)
                 task_id=task_id,
                 anchor=Anchor(
                     file=pending.region.path,
-                    # Declared symbol first; the AST-resolved one is the
-                    # fallback, so the anchor is (file, symbol) even when the
-                    # agent left the field empty (G-3).
-                    symbol=pending.symbol or pending.region.symbol,
+                    # Store identity is the hunk's AST (G-3). Declared
+                    # ``Pending.symbol`` is gate-only: a record_intent that
+                    # spans helpers must not stamp every line with the name
+                    # the agent typed for validation.
+                    symbol=pending.region.symbol or pending.symbol or None,
                     line_start=pending.region.line_start,
                     line_end=pending.region.line_end,
                     blob_sha=_blob_sha(workspace / pending.region.path),

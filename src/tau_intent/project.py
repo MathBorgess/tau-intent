@@ -377,9 +377,13 @@ def _node_id(entry: Any) -> str:
 def _recencias(entries: Sequence[Any]) -> dict[int, float]:
     """1 / (1 + newer entries on the same file), computed in one pass.
 
-    Was O(n^2) with a string compare per pair (roadmap §5.5). Ties on the
-    timestamp string still tie, deliberately: the store has no finer clock, and
-    inventing one here would be calibration.
+    Recency is among **current** entries that share a file, not a wall clock
+    and not per symbol. The newest timestamp on that file scores 1; older
+    distinct timestamps score ``1 / (1 + how many newer)``. Ties on the
+    timestamp string still tie, deliberately: the store has no finer clock,
+    and inventing one here would be calibration.
+
+    Was O(n^2) with a string compare per pair (roadmap §5.5).
     """
     por_arquivo: dict[str, list[tuple[str, int]]] = {}
     for entry in entries:

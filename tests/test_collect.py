@@ -142,7 +142,7 @@ class TestEvidenciaEstrutural(unittest.TestCase):
         codes = [f.code for f in portao(limpo, vazio, set(), GateConfig(), 0).falhas]
         self.assertEqual(codes, ["AUSENTE"])
 
-    def test_ancora_ambigua_com_fixture_multi_hunk(self):
+    def test_multi_hunk_mesmo_arquivo_sem_simbolo_ast_ainda_e_um_assunto(self):
         """Two hunks of the same file without distinct AST symbols are one identity."""
         from tau_intent.gate import GateConfig, portao
 
@@ -157,8 +157,8 @@ class TestEvidenciaEstrutural(unittest.TestCase):
         ]
         pendentes = collect_events(events, regions)
         self.assertTrue(all(p.claimed_regions == 2 for p in pendentes.values()))
-        codes = {f.code for f in portao(regions, pendentes, {"src/mod.py::f"}, GateConfig(), 0).falhas}
-        self.assertNotIn("ANCORA_AMBIGUA", codes)
+        verdict = portao(regions, pendentes, {"src/mod.py::f"}, GateConfig(), 0)
+        self.assertEqual(verdict.tipo, "PASSA")
 
     def test_files_atravessa_arquivos(self):
         from tau_intent.gate import GateConfig, portao
@@ -185,8 +185,8 @@ class TestEvidenciaEstrutural(unittest.TestCase):
         codes = {f.code for f in portao(
             regions, pendentes, {"src/a.py::f", "src/b.py::f"}, GateConfig(), 0
         ).falhas}
-        self.assertNotIn("ANCORA_AMBIGUA", codes)
         self.assertNotIn("AUSENTE", codes)
+        self.assertEqual(codes, set())
 
     def test_dominio_ausente_e_dado_do_coletor(self):
         from tau_intent.gate import GateConfig, portao
@@ -208,6 +208,89 @@ class TestEvidenciaEstrutural(unittest.TestCase):
         self.assertEqual(primeiro.size, 3)
         self.assertEqual(primeiro.edited_lines, 2)
         self.assertEqual(segundo.edited_lines, 2)
+
+    def test_um_why_sem_symbol_cobre_dois_defs(self):
+        """First construction: several defs, one subject. Empty declared symbol
+        claims every hunk of the file; the gate no longer splits on AST names."""
+        import tempfile
+        from pathlib import Path
+
+        from tau_intent.gate import GateConfig, portao
+
+        source = "def f():\n    return 1\n\ndef g():\n    return 2\n"
+        diff = (
+            "diff --git a/m.py b/m.py\n"
+            "--- a/m.py\n+++ b/m.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " def f():\n"
+            "-    return 0\n"
+            "+    return 1\n"
+            "@@ -4,2 +4,2 @@\n"
+            " def g():\n"
+            "-    return 0\n"
+            "+    return 2\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "m.py").write_text(source, encoding="utf-8")
+            regions = regions_from_diff(diff)
+            events = [{"tool_name": "record_intent", "args": {
+                "file": "m.py",
+                "why": "feat: expõe o recorte com helper extraído",
+                "property": "f e g cobrem o recorte",
+                "domain": "demo",
+            }}]
+            pendentes = collect_events(events, regions, root)
+        self.assertEqual({p.region.symbol for p in pendentes.values()}, {"f", "g"})
+        self.assertTrue(all(p.why.startswith("feat:") for p in pendentes.values()))
+        verdict = portao(
+            regions, pendentes, {"m.py::f", "m.py::g"}, GateConfig(), 0
+        )
+        self.assertEqual(verdict.tipo, "PASSA", [f.code for f in verdict.falhas])
+
+    def test_symbol_declarado_nao_reivindica_o_outro_def(self):
+        """Declared symbol is the accidental-claim guard: fix on f does not
+        stamp refactor on g. Two calls, two labels in why, two subjects."""
+        import tempfile
+        from pathlib import Path
+
+        source = "def f():\n    return 1\n\ndef g():\n    return 2\n"
+        diff = (
+            "diff --git a/m.py b/m.py\n"
+            "--- a/m.py\n+++ b/m.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " def f():\n"
+            "-    return 0\n"
+            "+    return 1\n"
+            "@@ -4,2 +4,2 @@\n"
+            " def g():\n"
+            "-    return 0\n"
+            "+    return 2\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "m.py").write_text(source, encoding="utf-8")
+            regions = regions_from_diff(diff)
+            events = [
+                {"tool_name": "record_intent", "args": {
+                    "file": "m.py", "symbol": "f",
+                    "why": "fix: overflow em f",
+                    "property": "f não estoura",
+                    "domain": "demo",
+                }},
+                {"tool_name": "record_intent", "args": {
+                    "file": "m.py", "symbol": "g",
+                    "why": "refactor: extrai g",
+                    "property": "g é puro",
+                    "domain": "demo",
+                }},
+            ]
+            pendentes = collect_events(events, regions, root)
+        por_simbolo = {p.region.symbol: p for p in pendentes.values()}
+        self.assertEqual(por_simbolo["f"].why, "fix: overflow em f")
+        self.assertEqual(por_simbolo["g"].why, "refactor: extrai g")
+        self.assertEqual(por_simbolo["f"].claimed_regions, 1)
+        self.assertEqual(por_simbolo["g"].claimed_regions, 1)
 
     def test_symbol_declarado_nao_e_preenchido_pelo_coletor(self):
         """SIMBOLO_NAO_RESOLVIDO has to be falsifiable (D2)."""

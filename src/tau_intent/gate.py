@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
 #: The structural taxonomy (G-8 + G-2). Declared here, frozen in ``gate.yaml``.
+#: ANCORA_AMBIGUA was deleted: grouping is authorship (the why), not AST names.
 CODIGOS = (
     "AUSENTE",
     "NAO_PARSEAVEL",
-    "ANCORA_AMBIGUA",
     "SIMBOLO_NAO_RESOLVIDO",
     "EDICAO_GRANDE_SEM_SIMBOLO",
     "DOMINIO_AUSENTE",
@@ -85,16 +85,17 @@ def portao(
 
     ``AUSENTE``                   diff x collector: region with no intent
     ``NAO_PARSEAVEL``             tool-call JSON: ``_raw_arguments`` / schema refused
-    ``ANCORA_AMBIGUA``            one intent on two+ AST symbols in the same file
     ``SIMBOLO_NAO_RESOLVIDO``     AST: ``symbol`` set but not resolvable in ``file``
     ``EDICAO_GRANDE_SEM_SIMBOLO`` diff + AST: identity over limiar, no resolved symbol
     ``DOMINIO_AUSENTE``           schema: ``domain`` empty (presence, not semantics)
 
     AtomicCommitBench (2607.03332): a median episode is 12 hunks / 6 files,
     not 12 intents and not 12× the line threshold. Spanning files is allowed.
-    ``ANCORA_AMBIGUA`` fires only when one intent sits on **different symbols
-    in the same file**. ``limiar_edicao`` (51, declared) is compared to edited
-    lines **summed per (file, symbol)**, not per hunk and not per episode.
+    One why may span several AST symbols in the same file — first construction
+    routinely splits a feature into helpers. Grouping is the why (a label such
+    as fix/refactor lives there); the gate does not split on AST names.
+    ``limiar_edicao`` (51, declared) is compared to edited lines **summed per
+    (file, symbol)**, not per hunk, not per episode, and not per intent.
     """
     known = set(symbols)
     falhas: list[Falha] = []
@@ -111,16 +112,6 @@ def portao(
         if not _field(pending, "why").strip():
             falhas.append(Falha("AUSENTE", region))
             continue
-
-        rivais = _simbolos_do_mesmo_arquivo(region, regions, pendentes)
-        if len(rivais) > 1:
-            falhas.append(
-                Falha(
-                    "ANCORA_AMBIGUA",
-                    region,
-                    f"{sorted(rivais)} em {_region_path(region)}",
-                )
-            )
 
         symbol = _field(pending, "symbol")
         resolvido = _resolve(symbol, region, known)
@@ -171,35 +162,6 @@ def _totais_editados(
         key = _chave_edicao(region)
         totais[key] = totais.get(key, 0) + _region_size(region, cfg)
     return totais
-
-
-def _simbolos_do_mesmo_arquivo(
-    region: object,
-    regions: Sequence[object],
-    pendentes: Mapping[object, object],
-) -> set[str]:
-    """AST symbols of this file attached to the same pending intent.
-
-    Empty (unresolved) does not count: multi-hunk of an unnamed file is one
-    identity, sized by the sum. Two resolved names in the same file are the
-    35.4% AtomicCommitBench case — hunks that belong to different commits.
-    Spanning files never enters this set.
-    """
-    pending = _lookup(pendentes, region)
-    if pending is None:
-        return set()
-    path = _region_path(region)
-    named: set[str] = set()
-    for other in regions:
-        if _region_path(other) != path:
-            continue
-        other_pending = _lookup(pendentes, other)
-        if other_pending is None or id(other_pending) != id(pending):
-            continue
-        symbol = _region_symbol(other)
-        if symbol:
-            named.add(symbol)
-    return named
 
 
 def _region_symbol(region: object) -> str:

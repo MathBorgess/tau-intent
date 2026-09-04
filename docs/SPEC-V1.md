@@ -36,27 +36,28 @@ Vendor plan B (subtree, zero lines changed, git diff empty vs upstream SHA) trig
 - edit takes edits: [{oldText, newText}].
 - bash can write files; those regions still need intent.
 - Unparseable = _raw_arguments present or local schema validation refused (V6).
-- `record_intent` accepts `file` (one path) or `files` (span). One intent may cover several files. Required schema field is `why`; `file` or `files` is required in practice by local schema_ok.
-- Declared `Pending.symbol` is never filled from the AST. `Region.symbol` is.
+- `record_intent` accepts `file` (one path) or `files` (span). One intent may cover several files **and several AST symbols in the same file**. Required schema field is `why`; `file` or `files` is required in practice by local schema_ok.
+- Declared `Pending.symbol` is never filled from the AST. `Region.symbol` is. Flush writes `Region.symbol` as the store anchor (declared symbol is gate-only).
+- A declared `symbol` **scopes** the call: only hunks whose AST name matches receive that why. That is the accidental-claim guard. An empty declared symbol claims every hunk of the listed files (one subject, several defs).
+- A label such as `fix` / `refactor` / `feat` is **authorship inside `why`**, not a schema field and not a gate check (H15: no regex on why). Different labels are different subjects; the agent issues a second `record_intent` (and declares `symbol` to keep them from overwriting each other).
 
 ## Gate (pure)
 
-No LLM, no I/O, no tau, no regex over `why`/`property`. Six structural codes:
+No LLM, no I/O, no tau, no regex over `why`/`property`. Five structural codes:
 
 | Code | Fires when |
 |---|---|
 | AUSENTE | diff region with no intent / empty why |
 | NAO_PARSEAVEL | args invalid / `_raw_arguments` |
-| ANCORA_AMBIGUA | one intent attached to **two or more different AST symbols in the same file** |
 | SIMBOLO_NAO_RESOLVIDO | declared `symbol` does not resolve in that file |
 | EDICAO_GRANDE_SEM_SIMBOLO | edited lines **summed per (file, symbol)** exceed `limiar_edicao` and no resolved symbol |
 | DOMINIO_AUSENTE | `domain` empty (presence, not semantics) |
 
 After n_max blocks → ESCALAR.
 
-Spanning files is not ANCORA_AMBIGUA (G-3 / AtomicCommitBench: 59.5% of commits cross files). Same-symbol multi-hunk is not ANCORA_AMBIGUA. Different symbols in one file are (35.4% of episodes have hunks of the same file belonging to different commits).
+`ANCORA_AMBIGUA` is deleted. One why may span several AST symbols in the same file: first construction of a feature routinely splits into helpers for reuse. Grouping is the why (including any label). AtomicCommitBench's 35.4% (hunks of the same file in different gold commits) is an authorship problem, not a gate code — the agent distinguishes those subjects in the why and scopes with `symbol`. Spanning files remains allowed (G-3 / 59.5%). Same-symbol multi-hunk remains one identity for `limiar_edicao`.
 
-`limiar_edicao: 51` is a **declared hyperparameter**, read from `gate.yaml`, never fitted. Unit: edited lines summed per (file, symbol). The number is AtomicCommitBench's mean hunks per episode (51 in 9.8 files), used as the size at which an unnamed identity must acquire a symbol — an edit as large as a typical entangled episode cannot stay unnamed. It is not a hunk cap. The median 12 hunks / 6 files is accepted by `files: []` plus summing per identity, independent of 51. `contexto_diff: 3` is declared; size is edited lines, not hunk length (D7).
+`limiar_edicao: 51` is a **declared hyperparameter**, read from `gate.yaml`, never fitted. Unit: edited lines summed per (file, symbol), not per intent. The number is AtomicCommitBench's mean hunks per episode (51 in 9.8 files), used as the size at which an unnamed identity must acquire a symbol — an edit as large as a typical entangled episode cannot stay unnamed. It is not a hunk cap. The median 12 hunks / 6 files is accepted by `files: []` plus summing per identity, independent of 51. `contexto_diff: 3` is declared; size is edited lines, not hunk length (D7).
 
 ## Store and `supersedes`
 
@@ -64,11 +65,17 @@ Append-only JSONL. No status field. Current vs superseded is derived from `super
 
 On `IntentStore.append`, every **current** entry whose `Anchor` overlaps the new one (same file, overlapping line range) is listed in `nova.supersedes`. The previous lines stay on disk; they are lastro. `store.current()` hides any id that appears in some later entry's `supersedes`. Nothing is rewritten; "recent" is derived at read time.
 
-The derived **block** is not stamped by `supersedes`. Projection iterates `current()` only. The receipt's `superadas_omitidas` is the lastro the model sees — a count, not the old `why`/`property`. Dumping superseded prose would be ungated injection (Rekal: map + episodes without a confidence gate 0.63 → 0.29). The count tells the agent that older intent exists and was revoked; the JSONL keeps the text for humans, V2b, and G-7 trailers.
+The derived **block** is not stamped by `supersedes`. Projection iterates `current()` only. The receipt's `superadas_omitidas` is the lastro the model sees — a count, not the old `why`/`property`.
+
+**Prosa superada** is the text of those hidden JSONL lines: a previous `why`/`property` whose id appears in a later entry's `supersedes`. It stays on disk for humans, V2b, and G-7 trailers. It is **not** injected into the envelope. Dumping it would be ungated retrieval — Rekal (Rekapalli et al.) measured that serving a map plus raw episodes without a confidence gate dropped the useful signal (0.63 → 0.29). The count tells the agent that older intent exists and was revoked; it does not replay the revoked prose.
+
+**Recency** (`_recencias`) is a score term, not a clock. Among **current** entries on the **same file**, the newest timestamp gets 1; each strictly older distinct timestamp on that file gets `1 / (1 + how many newer)`. Ties on the timestamp string tie. It is not per symbol and not per intent-id. It weights the greedy selector together with `(gamma ** hops)` and the type weight (property present or not).
+
+Same `why` with a **different `property`** is two entries. The selector does not collapse by why: both stay in the block if they fit the budget (duplicate prose of the why is the cost of keeping the two contracts visible).
 
 Connection to the loop:
 
-- **Capture** writes one JSONL line per pending region (a spanning `files: []` call becomes several lines, same why, different anchors).
+- **Capture** writes one JSONL line per pending region (a spanning `files: []` call, or one why over several defs, becomes several lines, same why, anchors from `Region.symbol`).
 - **Gate** never reads the store. It judges the session's diff against pendentes. Supersession is a store concern, not a gate code.
 - **Derived view** (`project`) iterates `store.current()` only. Superseded intents are counted in the receipt as `superadas_omitidas` and are not scored. Recency is among current entries on the same file.
 

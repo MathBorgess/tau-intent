@@ -193,6 +193,68 @@ class TestAncoraGravada(unittest.TestCase):
         self.assertEqual(len(anchor.blob_sha), 40)
         self.assertEqual(result.verdict, "PASSA")
 
+    def test_flush_ancora_pelo_symbol_da_regiao_nao_pelo_declarado(self) -> None:
+        """Store identity is the hunk's AST. Declared symbol is gate-only."""
+        from tau_intent.collect import Pending
+        from tau_intent.store import IntentStore
+        from tau_intent.supervisor import _flush_pendentes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "a.py").write_text(
+                "def f():\n    return 1\n\ndef g():\n    return 2\n",
+                encoding="utf-8",
+            )
+            region = Region(
+                path="src/a.py", line_start=4, line_end=5, symbol="g"
+            )
+            pending = Pending(
+                region=region,
+                why="feat: recorte com helper",
+                property="g é puro",
+                domain="demo",
+                symbol="f",
+            )
+            store = IntentStore(root)
+            _flush_pendentes(store, {region.key(): pending}, "t1", root)
+            entries = store.current()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].anchor.symbol, "g")
+        self.assertEqual(entries[0].why, "feat: recorte com helper")
+
+    def test_flush_mesmo_why_property_diferente_sao_duas_linhas(self) -> None:
+        from tau_intent.collect import Pending
+        from tau_intent.store import IntentStore
+        from tau_intent.supervisor import _flush_pendentes
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "a.py").write_text(
+                "def f():\n    return 1\n\ndef g():\n    return 2\n",
+                encoding="utf-8",
+            )
+            rf = Region(path="src/a.py", line_start=1, line_end=2, symbol="f")
+            rg = Region(path="src/a.py", line_start=4, line_end=5, symbol="g")
+            why = "feat: recorte com helper"
+            pendentes = {
+                rf.key(): Pending(
+                    region=rf, why=why, property="f retorna int", domain="demo"
+                ),
+                rg.key(): Pending(
+                    region=rg, why=why, property="g é puro", domain="demo"
+                ),
+            }
+            store = IntentStore(root)
+            _flush_pendentes(store, pendentes, "t1", root)
+            entries = store.current()
+        self.assertEqual(len(entries), 2)
+        por_simbolo = {e.anchor.symbol: e for e in entries}
+        self.assertEqual(por_simbolo["f"].why, por_simbolo["g"].why)
+        self.assertEqual(por_simbolo["f"].property, "f retorna int")
+        self.assertEqual(por_simbolo["g"].property, "g é puro")
+
 
 class TestSupervisorCompat(unittest.TestCase):
     def test_run_task_arm_a_no_intents(self) -> None:

@@ -81,7 +81,12 @@ class TestGateConfigVemDoYaml(unittest.TestCase):
         self.assertEqual(raw["versao"], "gate-v2-estrutural")
         for morto in ("genericas", "stopwords", "gramatica_de_citacao"):
             self.assertNotIn(morto, raw)
-        for morto in ("GENERICA", "PROPERTY_SEM_SIMBOLO", "EDICAO_GRANDE_SEM_PROPERTY"):
+        for morto in (
+            "GENERICA",
+            "PROPERTY_SEM_SIMBOLO",
+            "EDICAO_GRANDE_SEM_PROPERTY",
+            "ANCORA_AMBIGUA",
+        ):
             self.assertNotIn(morto, raw["codigos"])
 
     def test_mudar_o_yaml_muda_o_comportamento_do_portao(self) -> None:

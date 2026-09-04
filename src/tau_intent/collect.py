@@ -3,12 +3,19 @@
 The collector is where the evidence the gate needs is produced (G-2, G-3).
 Three things it used to compute and throw away are now exposed:
 ``Pending.unparseable`` (V6, feeds NAO_PARSEAVEL), ``Pending.claimed_regions``
-(one intent claimed by N regions; ANCORA_AMBIGUA only if those regions
-resolve to different AST symbols in the same file) and ``Pending.domain``
+(how many distinct diff regions this call covered) and ``Pending.domain``
 (feeds DOMINIO_AUSENTE). Two things it never computed are now produced:
 ``Region.edited_lines`` — added/changed lines, not hunk length (D7) — and
 ``Region.symbol``, the enclosing definition resolved from the AST, which is
-the stable anchor of G-3: reformatting a file moves lines but not the symbol.
+the stable store identity of G-3: reformatting a file moves lines but not
+the symbol.
+
+One ``record_intent`` why may span several AST symbols in the same file
+(first construction split into helpers). A declared ``symbol`` scopes the
+call to hunks of that def — that is the accidental-claim guard. An empty
+declared symbol claims every hunk of the listed files. The label that
+distinguishes fix from refactor lives in ``why``; the collector does not
+parse it.
 """
 
 from __future__ import annotations
@@ -194,9 +201,13 @@ def collect_events(
     (missing ``path``, ``file_path`` used instead, edit without ``edits``).
 
     When ``workspace`` is given, ``Region.symbol`` is resolved from the AST of
-    the post-edit tree (G-3). The *declared* ``Pending.symbol`` is never filled
-    from it — the gate has to be able to fail.
+    the post-edit tree (G-3) **before** intents attach, so a declared symbol
+    can scope the call. The *declared* ``Pending.symbol`` is never filled
+    from the AST — the gate has to be able to fail.
     """
+    regions = list(regions)
+    if workspace is not None:
+        resolver_simbolos(regions, workspace)
     by_path = _index_regions(regions)
     pendentes: dict[tuple[str, int, int], Pending] = {}
 
@@ -222,6 +233,10 @@ def collect_events(
                     by_path.setdefault(path, []).append(region)
             elif not matched and not paths:
                 matched = [region for group in by_path.values() for region in group]
+            if name == INTENT_TOOL:
+                matched = _restringir_ao_simbolo(
+                    matched, str(args.get("symbol") or "")
+                )
             for region in matched:
                 pending = pendentes.setdefault(region.key(), Pending(region=region))
                 pending.trigger_log.append(name)
@@ -233,9 +248,6 @@ def collect_events(
                     pending.property = str(args.get("property") or pending.property)
                     pending.domain = str(args.get("domain") or pending.domain)
                     pending.symbol = str(args.get("symbol") or pending.symbol)
-                    # One call may cover N regions (span files, or multi-hunk
-                    # of one symbol). Ambiguity is decided by the gate from
-                    # AST identities, not from this count.
                     pending.claimed_regions = max(len(matched), 1)
                     if pending.intent_turn is None:
                         pending.intent_turn = ordinal
@@ -254,6 +266,20 @@ def _index_regions(regions: Iterable[Region]) -> dict[str, list[Region]]:
     for region in regions:
         indexed.setdefault(region.path, []).append(region)
     return indexed
+
+
+def _restringir_ao_simbolo(matched: list[Region], declared: str) -> list[Region]:
+    """Declared symbol scopes the call. Empty declared claims every listed hunk.
+
+    Without a resolved AST name on the hunks, the collector cannot scope and
+    leaves the match as it is (tests and pre-resolve paths). That is not a
+    silent claim of a named def: there is no name to claim.
+    """
+    if not declared:
+        return matched
+    if not any(region.symbol for region in matched):
+        return matched
+    return [region for region in matched if region.symbol == declared]
 
 
 def _match_regions(by_path: Mapping[str, list[Region]], path: str) -> list[Region]:

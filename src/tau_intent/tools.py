@@ -86,14 +86,22 @@ RECORD_INTENT_SCHEMA: dict[str, Any] = {
         "symbol": {
             "type": "string",
             "description": (
-                "Name of the def/class this increment lives in, exactly as written "
-                "in the file. This is the structural anchor: it is resolved against "
-                "the AST, and it survives a reformat that moves every line. For a "
-                "multi-file intent, name the symbol in the primary file; each file's "
-                "hunks keep their own AST identity."
+                "Optional scope: name of the def/class this call claims, exactly "
+                "as written in the file, resolved against the AST. When set, only "
+                "hunks of that symbol receive this why (accidental-claim guard). "
+                "Omit it so one why covers every hunk of the listed files — "
+                "several defs, one subject. Labels such as fix/refactor live in "
+                "why, not here."
             ),
         },
-        "why": {"type": "string", "description": "Why this code exists this way."},
+        "why": {
+            "type": "string",
+            "description": (
+                "Why this code exists this way. The subject of the increment, "
+                "including any label (fix, refactor, feat) that distinguishes "
+                "this decision from another in the same file."
+            ),
+        },
         "property": {
             "type": "string", "description": "Pre/post-condition this increment assumes or establishes.",
         },
@@ -134,9 +142,11 @@ BASH_DESCRIPTION = _origin_doc(
 
 RECORD_INTENT_DESCRIPTION = (
     "Registra a intenção deste incremento. Chame antes de encerrar o turno. "
-    "Preencha symbol com o nome do def/class editado (âncora estrutural, "
-    "validada contra o AST) e domain com o conceito de domínio. "
-    "Se a decisão atravessa arquivos, passe files: [..] — um intent, vários arquivos."
+    "why é o assunto (fix/refactor/feat distinguem decisões). "
+    "symbol, se preenchido, restringe a chamada àquele def — omita para "
+    "cobrir vários defs do mesmo arquivo com o mesmo why. "
+    "domain é o conceito de domínio. "
+    "Se a decisão atravessa arquivos, passe files: [..]."
 )
 
 
@@ -150,10 +160,11 @@ async def record_intent(
 ) -> dict[str, Any]:
     """Registra a intenção deste incremento. Chame antes de encerrar o turno.
 
-    why:      por que este código existe deste jeito
-    property: pré/pós-condição que ele assume — cite símbolos que existem
+    why:      assunto deste incremento; um rótulo (fix/refactor/feat) distingue decisões
+    property: pré/pós-condição — why iguais com property diferentes são duas entradas
     domain:   que conceito do domínio ele encarna
     files:    arquivos que a decisão atravessa; file continua válido sozinho
+    symbol:   escopo opcional; omitido, o why cobre todos os hunks listados
     """
     ancoras = list(files or [])
     if file and file not in ancoras:

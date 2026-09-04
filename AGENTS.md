@@ -9,7 +9,7 @@ Read `docs/SPEC-V1.md` before touching code. Stop there. The vault is not requir
 3. **Gate is a pure function.** No model call, no network, no tau import inside `gate.py`.
 4. **Last TurnEndEvent only** (`tool_results == []`). Not every turn.
 5. **Turn cap is productive turns.** Blocking turns are a separate budget. Identical raw `max_turns` is a bug (biased against B/C).
-6. **Anchors come from git diff.** Tool events attach why/property/symbol/domain. The write/edit argument is `path`, not `file_path`. `bash` also writes files. `record_intent` may span files via `files: [...]`.
+6. **Anchors come from git diff.** Tool events attach why/property/symbol/domain. The write/edit argument is `path`, not `file_path`. `bash` also writes files. `record_intent` may span files via `files: [...]` and several AST symbols in the same file. Declared `symbol` scopes the call; omit it to cover every hunk. Flush writes `Region.symbol`.
 7. **Arm A must not write intents.jsonl.** Abort if it does.
 8. **Temperature 0 is set by the owner on the provider they expose.** If you use tau's built-in provider, stamp the HTTP body and test the body. Do not trust a config object. Do not invent `seed` unless the wire carries it.
 9. **Copy read/write/edit/bash with origin SHA in the docstring (MIT).** Their descriptions are experimental fixtures.
@@ -21,7 +21,7 @@ Read `docs/SPEC-V1.md` before touching code. Stop there. The vault is not requir
 
 ## Gate codes (structural)
 
-AUSENTE, NAO_PARSEAVEL, ANCORA_AMBIGUA (different AST symbols in the **same** file), SIMBOLO_NAO_RESOLVIDO, EDICAO_GRANDE_SEM_SIMBOLO (sum of edited lines per identity), DOMINIO_AUSENTE. No GENERICA. No regex on why.
+AUSENTE, NAO_PARSEAVEL, SIMBOLO_NAO_RESOLVIDO, EDICAO_GRANDE_SEM_SIMBOLO (sum of edited lines per identity), DOMINIO_AUSENTE. No ANCORA_AMBIGUA. No GENERICA. No regex on why. A label such as fix/refactor lives in the why (authorship), not as a gate code.
 
 ## Slices already on main (do not reopen)
 
