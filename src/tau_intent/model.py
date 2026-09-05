@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from tau_intent.checkpoint import Checkpoint
 
 
 @dataclass(frozen=True)
@@ -34,3 +35,5 @@ class IntentEntry:
     supersedes: tuple[str, ...] = ()
     author: str = "agent"
     trigger_log: tuple[str, ...] = field(default_factory=tuple)
+    checkpoint: Checkpoint | None = None
+

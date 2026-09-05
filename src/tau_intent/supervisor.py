@@ -153,6 +153,7 @@ async def run_task(
     summarizer_fn: Callable[[str], Any] | None = None,
     alvos_excluidos: list[str] | None = None,
     adapter: Adapter | str = "code",
+    checkpoint_source: Callable[[list], Any] | None = None,
 ) -> RunResult:
     adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
@@ -261,8 +262,12 @@ async def run_task(
 
     pendentes = adapter.collect(collected_events, regions, workspace)
 
+    checkpoint = checkpoint_source(regions) if checkpoint_source is not None else None
+    if checkpoint is not None:
+        if checkpoint.changed_targets != tuple(sorted({r.node_id() for r in regions})):
+            raise ValueError("checkpoint targets differ from independently observed effects")
     if flags.capture and store is not None:
-        _flush_pendentes(store, pendentes, task_id, workspace, adapter)
+        _flush_pendentes(store, pendentes, task_id, workspace, adapter, checkpoint)
     elif not flags.capture:
         after = _line_count(intents_path)
         if after > before_lines:
@@ -347,7 +352,7 @@ def _projetar_visao_derivada(
 
 
 def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path,
-                     adapter: Adapter | None = None) -> None:
+                     adapter: Adapter | None = None, checkpoint: Any = None) -> None:
     adapter = adapter or get_adapter("code")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for pending in pendentes.values():
@@ -367,6 +372,7 @@ def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path,
                 property=pending.property,
                 domain=pending.domain,
                 trigger_log=tuple(pending.trigger_log),
+                checkpoint=checkpoint,
             )
         )
 

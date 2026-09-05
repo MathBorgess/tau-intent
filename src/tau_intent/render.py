@@ -92,6 +92,13 @@ def render_entry(entry: Any, cfg: BlocoConfig | None = None) -> str:
         rotulo, valor = rotulos.get(campo, ("", ""))
         if valor:
             lines.append(f"  {rotulo}: {valor}")
+    checkpoint = getattr(entry, "checkpoint", None)
+    if checkpoint is not None:
+        lines.append("  Checkpoint (evidência determinística):")
+        for name in ("changed_targets", "non_target_artifacts", "latest_validation_command",
+                     "latest_validation_evidence", "continuation_state"):
+            value = getattr(checkpoint, name)
+            lines.append(f"    {name}: {value if value is not None else 'não disponível'}")
     return "\n".join(lines)
 
 

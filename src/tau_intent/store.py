@@ -7,6 +7,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from tau_intent.model import Anchor, IntentEntry
+from tau_intent.checkpoint import Checkpoint
 
 
 class IntentStore:
@@ -45,7 +46,10 @@ class IntentStore:
         nova = replace(nova, supersedes=tuple(sobrepostas))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(nova), ensure_ascii=False) + "\n")
+            data = asdict(nova)
+            if nova.checkpoint is None:
+                data.pop("checkpoint")  # legacy records remain byte-compatible
+            handle.write(json.dumps(data, ensure_ascii=False) + "\n")
         self._entries.append(nova)
         self._superseded.update(sobrepostas)
         return nova
@@ -82,4 +86,5 @@ def _entry_from_dict(data: dict) -> IntentEntry:
         supersedes=tuple(data.get("supersedes") or ()),
         author=data.get("author", "agent"),
         trigger_log=tuple(data.get("trigger_log") or ()),
+        checkpoint=Checkpoint.from_dict(data["checkpoint"]) if data.get("checkpoint") is not None else None,
     )
