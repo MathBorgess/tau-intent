@@ -52,6 +52,7 @@ class Falha:
 class Veredito:
     tipo: str
     falhas: tuple[Falha, ...] = ()
+    nao_avaliaveis: tuple[Falha, ...] = ()
 
     @classmethod
     def passa(cls) -> "Veredito":
@@ -99,9 +100,15 @@ def portao(
     """
     known = set(symbols)
     falhas: list[Falha] = []
+    nao_avaliaveis: list[Falha] = []
     totais = _totais_editados(regions, cfg)
 
     for region in regions:
+        resolver = (region.get("resolver", "fornecido") if isinstance(region, dict)
+                    else getattr(region, "resolver", "fornecido"))
+        if resolver is None:
+            nao_avaliaveis.extend(Falha(code, region, "fonte de identidades indisponível")
+                                  for code in CODIGOS[2:4])
         pending = _lookup(pendentes, region)
         if pending is None:
             falhas.append(Falha("AUSENTE", region))
@@ -115,27 +122,24 @@ def portao(
 
         symbol = _field(pending, "symbol")
         resolvido = _resolve(symbol, region, known)
-        if symbol and not resolvido:
+        if resolver is not None and symbol and not resolvido:
             falhas.append(Falha("SIMBOLO_NAO_RESOLVIDO", region, symbol))
 
         total = totais[_chave_edicao(region)]
-        if total > cfg.limiar_edicao and not resolvido:
+        if resolver is not None and total > cfg.limiar_edicao and not resolvido:
             falhas.append(
                 Falha(
                     "EDICAO_GRANDE_SEM_SIMBOLO",
                     region,
-                    f"{total} linhas editadas",
+                    f"{total} {getattr(region, 'size_unit', 'unidades')}",
                 )
             )
 
         if not _field(pending, "domain").strip():
             falhas.append(Falha("DOMINIO_AUSENTE", region))
 
-    if not falhas:
-        return Veredito.passa()
-    if bloqueios >= cfg.n_max:
-        return Veredito.escalar(falhas)
-    return Veredito.bloqueia(falhas)
+    tipo = "PASSA" if not falhas else ("ESCALAR" if bloqueios >= cfg.n_max else "BLOQUEIA")
+    return Veredito(tipo, tuple(falhas), tuple(nao_avaliaveis))
 
 
 avaliar = portao

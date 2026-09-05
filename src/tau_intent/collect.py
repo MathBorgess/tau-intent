@@ -49,6 +49,9 @@ class Region:
     #: evidence, not identity: the line range is what git gives, the symbol is
     #: what survives a reformat.
     symbol: str | None = None
+    #: Identity witness supplied by caller, or stamped by the resolver.
+    resolver: str | None = "fornecido"
+    size_unit: str = "edited_lines"
 
     def __post_init__(self) -> None:
         if not self.size:
@@ -160,7 +163,15 @@ def resolver_simbolos(regions: Iterable[Region], workspace: Path | str | None) -
             except (OSError, UnicodeDecodeError):
                 cache[region.path] = None
         source = cache[region.path]
-        if source is not None:
+        region.resolver = None
+        if source is not None and Path(region.path).suffix == ".py":
+            try:
+                ast.parse(source)
+            except (SyntaxError, ValueError):
+                pass
+            else:
+                region.resolver = "stdlib-identities-v1"
+        if region.resolver is not None:
             region.symbol = resolver_simbolo(source, region.line_start, region.line_end)
         out.append(region)
     return out
