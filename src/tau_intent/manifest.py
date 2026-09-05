@@ -56,6 +56,11 @@ def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -
         "productive_turns": telemetry.get("productive_turns"),
         "block_turns": telemetry.get("block_turns"),
     }
+    for campo in ("cobertura_efetiva", "fracao_resolvida", "denominadores",
+                  "cobertura_por_adaptador", "cobertura_por_linguagem",
+                  "codigos_nao_avaliaveis", "alvos_excluidos",
+                  "edge_types_efetivos", "grafo_heterogeneo", "adaptadores"):
+        execucao[campo] = telemetry.get(campo)
     for campo, valor in telemetry.items():
         if campo.startswith("llm_rescue"):
             execucao[campo] = valor
@@ -133,3 +138,29 @@ def conferir_v4_v5(v4: dict[str, Any], v5: dict[str, Any] | None) -> None:
             nome for nome in set(a) | set(b) if a.get(nome) != b.get(nome)
         )
         raise RelatoIncoerente(f"V4 e V5 sobre YAML diferentes: {diferentes}")
+
+
+def conferir_resolvedores(regions: list, excluidos: list[str]) -> None:
+    missing = {r.path for r in regions if r.resolver is None} - set(excluidos)
+    if missing:
+        raise AssertionError(f"alvos sem resolver não declarados excluídos: {sorted(missing)}")
+
+
+def cobertura_distribuida(regions: list, entries: list, indisponiveis: list,
+                         excluidos: list[str]) -> dict[str, Any]:
+    """Declare instrument reach separately from capture success."""
+    from pathlib import Path
+    from tau_intent.telemetry import cobertura_de_captura
+    conferir_resolvedores(regions, excluidos)
+    grupos: dict[str, list] = {}
+    for r in regions:
+        grupos.setdefault(Path(r.path).suffix.lstrip(".") or "sem-extensao", []).append(r)
+    return {
+        "cobertura_por_adaptador": {"code": cobertura_de_captura(regions, entries)},
+        "cobertura_por_linguagem": {k: cobertura_de_captura(rs, entries) for k,rs in grupos.items()},
+        "codigos_nao_avaliaveis": [
+            {"code": f.code, "alvo": f.region.path, "detail": f.detail} for f in indisponiveis],
+        "alvos_excluidos": sorted(excluidos),
+        "adaptadores": {"code": {"size_unit": "edited_lines",
+                         "resolvedores": sorted({r.resolver for r in regions if r.resolver})}},
+    }

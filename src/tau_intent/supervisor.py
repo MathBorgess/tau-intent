@@ -162,6 +162,7 @@ async def run_task(
     gate_fn: Callable[..., Veredito] | None = None,
     project_fn: Callable[..., tuple[str, dict]] | None = None,
     summarizer_fn: Callable[[str], Any] | None = None,
+    alvos_excluidos: list[str] | None = None,
 ) -> RunResult:
     workspace = Path(workspace)
     intents_path = workspace / "intents.jsonl"
@@ -191,7 +192,13 @@ async def run_task(
         regions_from_diff(diff if diff is not None else git_diff(workspace)), workspace
     )
 
-    tel: dict[str, Any] = {"tokenizer": "whitespace-v1"}
+    from tau_intent.manifest import conferir_resolvedores, cobertura_distribuida
+    excluidos = (sorted({r.path for r in regions if r.resolver is None})
+                 if alvos_excluidos is None else list(alvos_excluidos))
+    conferir_resolvedores(regions, excluidos)
+    indisponiveis = []
+    tel: dict[str, Any] = {"tokenizer": "whitespace-v1",
+                           "edge_types_efetivos": [], "grafo_heterogeneo": False}
     current_entries: list[Any] = []
     if store is None:
         store = IntentStore(workspace)
@@ -253,6 +260,7 @@ async def run_task(
             gate_cfg,
             blocks,
         )
+        indisponiveis = list(v.nao_avaliaveis)
         verdict = v.tipo
         if v.tipo == "BLOQUEIA":
             blocks += 1
@@ -273,7 +281,10 @@ async def run_task(
 
     depois = list(store.current()) if store is not None else []
     tel["cobertura_de_captura"] = cobertura_de_captura(regions, depois)
-    tel["cobertura_efetiva"] = tel["cobertura_de_captura"]
+    tel["cobertura_efetiva"] = tel["cobertura_de_captura"]["estrita"]
+    tel["fracao_resolvida"] = tel["cobertura_de_captura"]["fracao_resolvida"]
+    tel["denominadores"] = tel["cobertura_de_captura"]["denominadores"]
+    tel.update(cobertura_distribuida(regions, depois, indisponiveis, excluidos))
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
@@ -337,6 +348,8 @@ def _projetar_visao_derivada(
         superadas=superadas,
         summarizer_fn=summarizer_fn,
     )
+    tel["edge_types_efetivos"] = sorted({key for edges in graph._out.values() for _,key in edges})
+    tel["grafo_heterogeneo"] = len(tel["edge_types_efetivos"]) > 1
     tel["ancoras"] = list(ancoras)
     tel["ancoras_vazias"] = False
     return bloco, tel
