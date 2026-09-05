@@ -13,7 +13,7 @@ arm's path (D1). It stayed an inspection tool in ``render.py``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -70,6 +70,7 @@ class RunResult:
     intents_path: Path
     telemetry: dict[str, Any]
     bloco: str = ""
+    manifest: dict[str, Any] = field(default_factory=dict)
 
 
 
@@ -154,6 +155,8 @@ async def run_task(
     alvos_excluidos: list[str] | None = None,
     adapter: Adapter | str = "code",
     checkpoint_source: Callable[[list], Any] | None = None,
+    modelo_produtor: str | None = None,
+    modelo_consumidor: str | None = None,
 ) -> RunResult:
     adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
@@ -175,6 +178,12 @@ async def run_task(
     if harness is None:
         harness = FakeHarness(max_turns=None, tools=tools)
     _assert_tau_max_turns_none(harness)
+    modelo_consumidor = modelo_consumidor or getattr(harness, "model_id", None)
+    if modelo_consumidor is None and isinstance(harness, FakeHarness):
+        modelo_consumidor = "fake-provider-v1"
+    modelo_produtor = modelo_produtor or modelo_consumidor
+    if not modelo_produtor or not modelo_consumidor:
+        raise ValueError("a execução exige modelo_produtor e modelo_consumidor")
 
     # Regions come first: they are the anchors of the derived view (D3). Their
     # symbols are resolved here, before serving, so the anchor is (file, symbol)
@@ -216,6 +225,9 @@ async def run_task(
         servidas = list(proj_tel.pop("servidas", []))
         tel.update(proj_tel)
         tel.setdefault("tokens_served", count_tokens(bloco))
+    tel["servidas"] = [{"id": e.id, "status": "current"} for e in servidas]
+    tel["modelo_produtor"] = modelo_produtor
+    tel["modelo_consumidor"] = modelo_consumidor
     tel["bloco_vazio"] = not bloco.strip()
 
     prompt_text = montar(prompt_base, prompt, bloco, bloco_cfg)
@@ -297,6 +309,7 @@ async def run_task(
     tel["productive_turns"] = productive
     tel["block_turns"] = blocks
     tel["max_turns_on_tau"] = None
+    from tau_intent.manifest import manifest_da_execucao
     return RunResult(
         flags=flags,
         productive_turns=productive,
@@ -306,6 +319,7 @@ async def run_task(
         intents_path=intents_path,
         telemetry=tel,
         bloco=bloco,
+        manifest=manifest_da_execucao(flags, tel),
     )
 
 

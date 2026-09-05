@@ -11,7 +11,10 @@ from tau_intent.telemetry import count_tokens
 
 
 class IntentRetrieval:
-    def __init__(self, store, adapter, workspace, cfg=None, query_anchors=None):
+    def __init__(self, store, adapter, workspace, cfg=None, query_anchors=None, *,
+                 modelo_produtor=None, modelo_consumidor=None):
+        self.modelo_produtor = modelo_produtor
+        self.modelo_consumidor = modelo_consumidor
         self.store = store
         self.adapter = adapter
         self.workspace = workspace
@@ -53,6 +56,8 @@ class IntentRetrieval:
             results.append(block)
             remaining -= count_tokens(block)
         self.telemetry = {
+            'modelo_produtor': self.modelo_produtor,
+            'modelo_consumidor': self.modelo_consumidor,
             'recibos': receipts, 'tokens_served': self.cfg.token_budget-remaining,
             'servidas': [{'id': eid, 'status': 'current'} for eid in sorted(served)],
             'alvos_nao_consultados': anchors[visited:], 'top_k': top_k,
