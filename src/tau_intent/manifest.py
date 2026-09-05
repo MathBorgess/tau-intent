@@ -147,20 +147,21 @@ def conferir_resolvedores(regions: list, excluidos: list[str]) -> None:
 
 
 def cobertura_distribuida(regions: list, entries: list, indisponiveis: list,
-                         excluidos: list[str]) -> dict[str, Any]:
+                         excluidos: list[str], adapter=None) -> dict[str, Any]:
     """Declare instrument reach separately from capture success."""
-    from pathlib import Path
+    from tau_intent.adapters import get_adapter
+    adapter = adapter or get_adapter("code")
     from tau_intent.telemetry import cobertura_de_captura
     conferir_resolvedores(regions, excluidos)
     grupos: dict[str, list] = {}
     for r in regions:
-        grupos.setdefault(Path(r.path).suffix.lstrip(".") or "sem-extensao", []).append(r)
+        grupos.setdefault(adapter.classification(r), []).append(r)
     return {
-        "cobertura_por_adaptador": {"code": cobertura_de_captura(regions, entries)},
-        "cobertura_por_linguagem": {k: cobertura_de_captura(rs, entries) for k,rs in grupos.items()},
+        "cobertura_por_adaptador": {adapter.name: cobertura_de_captura(regions, entries)},
+        "cobertura_por_linguagem": {k: cobertura_de_captura(rs, entries) for k,rs in grupos.items()} if adapter.name == "code" else {},
         "codigos_nao_avaliaveis": [
             {"code": f.code, "alvo": f.region.path, "detail": f.detail} for f in indisponiveis],
         "alvos_excluidos": sorted(excluidos),
-        "adaptadores": {"code": {"size_unit": "edited_lines",
+        "adaptadores": {adapter.name: {"size_unit": adapter.size_unit, "versao": adapter.version,
                          "resolvedores": sorted({r.resolver for r in regions if r.resolver})}},
     }

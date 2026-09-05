@@ -13,7 +13,6 @@ arm's path (D1). It stayed an inspection tool in ``render.py``.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +30,8 @@ from tau_intent.collect import (
 from tau_intent.config import BlocoConfig, load_bloco_config, load_gate_config
 from tau_intent.fake_provider import FakeHarness
 from tau_intent.gate import GateConfig, Veredito, portao
-from tau_intent.model import Anchor, IntentEntry
+from tau_intent.model import IntentEntry
+from tau_intent.adapters import Adapter, get_adapter
 from tau_intent.render import render_falhas
 from tau_intent.store import IntentStore
 from tau_intent.telemetry import (
@@ -72,17 +72,6 @@ class RunResult:
     bloco: str = ""
 
 
-def git_diff(workspace: Path) -> str:
-    import subprocess
-
-    proc = subprocess.run(
-        ["git", "diff", "--no-color", "HEAD"],
-        cwd=workspace,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return proc.stdout or ""
 
 
 def montar(
@@ -163,7 +152,9 @@ async def run_task(
     project_fn: Callable[..., tuple[str, dict]] | None = None,
     summarizer_fn: Callable[[str], Any] | None = None,
     alvos_excluidos: list[str] | None = None,
+    adapter: Adapter | str = "code",
 ) -> RunResult:
+    adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
     intents_path = workspace / "intents.jsonl"
     before_lines = _line_count(intents_path)
@@ -188,9 +179,7 @@ async def run_task(
     # symbols are resolved here, before serving, so the anchor is (file, symbol)
     # and not merely the file — otherwise the projection loses the precision the
     # graph has, at the one moment it matters.
-    regions = resolver_simbolos(
-        regions_from_diff(diff if diff is not None else git_diff(workspace)), workspace
-    )
+    regions = adapter.effects(workspace, diff)
 
     from tau_intent.manifest import conferir_resolvedores, cobertura_distribuida
     excluidos = (sorted({r.path for r in regions if r.resolver is None})
@@ -214,7 +203,7 @@ async def run_task(
         tel["serve_sem_projecao"] = True
         tel["tokens_served"] = 0
     elif flags.serve:
-        projetar = project_fn or _projetar_visao_derivada
+        projetar = project_fn or (lambda *args: _projetar_visao_derivada(*args, adapter=adapter))
         bloco, proj_tel = projetar(
             workspace,
             current_entries,
@@ -252,11 +241,11 @@ async def run_task(
         if not flags.gate:
             verdict = "PASSA"
             break
-        pendentes = collect_events(collected_events, regions, workspace)
+        pendentes = adapter.collect(collected_events, regions, workspace)
         v = gate_fn(
             regions,
             pendentes,
-            symbols if symbols is not None else simbolos_do_ast(regions, workspace),
+            symbols if symbols is not None else adapter.identities(regions, workspace),
             gate_cfg,
             blocks,
         )
@@ -270,10 +259,10 @@ async def run_task(
             continue
         break
 
-    pendentes = collect_events(collected_events, regions, workspace)
+    pendentes = adapter.collect(collected_events, regions, workspace)
 
     if flags.capture and store is not None:
-        _flush_pendentes(store, pendentes, task_id, workspace)
+        _flush_pendentes(store, pendentes, task_id, workspace, adapter)
     elif not flags.capture:
         after = _line_count(intents_path)
         if after > before_lines:
@@ -284,7 +273,7 @@ async def run_task(
     tel["cobertura_efetiva"] = tel["cobertura_de_captura"]["estrita"]
     tel["fracao_resolvida"] = tel["cobertura_de_captura"]["fracao_resolvida"]
     tel["denominadores"] = tel["cobertura_de_captura"]["denominadores"]
-    tel.update(cobertura_distribuida(regions, depois, indisponiveis, excluidos))
+    tel.update(cobertura_distribuida(regions, depois, indisponiveis, excluidos, adapter))
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
@@ -322,17 +311,19 @@ def _projetar_visao_derivada(
     flags: Flags,
     superadas: int = 0,
     summarizer_fn: Callable[[str], Any] | None = None,
+    *, adapter: Adapter | None = None,
 ) -> tuple[str, dict]:
     """Both measured arms project (H16). The knob that separates them is llm_rescue."""
     from dataclasses import replace
 
-    from tau_intent.graph import build_cached
     from tau_intent.project import load_project_config, projetar
 
     cfg = load_project_config()
     if flags.llm_rescue != cfg.llm_rescue:
         cfg = replace(cfg, llm_rescue=flags.llm_rescue)
-    graph = build_cached(str(workspace), "worktree")
+    adapter = adapter or get_adapter("code")
+    cfg = replace(cfg, edge_types=adapter.edge_types)
+    graph = adapter.neighbourhood(workspace)
     if not ancoras:
         return "", {
             "llm_rescue": cfg.llm_rescue,
@@ -355,7 +346,9 @@ def _projetar_visao_derivada(
     return bloco, tel
 
 
-def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path) -> None:
+def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path,
+                     adapter: Adapter | None = None) -> None:
+    adapter = adapter or get_adapter("code")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for pending in pendentes.values():
         if not isinstance(pending, Pending):
@@ -369,17 +362,7 @@ def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path)
                 id=str(uuid4()),
                 ts=now,
                 task_id=task_id,
-                anchor=Anchor(
-                    file=pending.region.path,
-                    # Store identity is the hunk's AST (G-3). Declared
-                    # ``Pending.symbol`` is gate-only: a record_intent that
-                    # spans helpers must not stamp every line with the name
-                    # the agent typed for validation.
-                    symbol=pending.region.symbol or pending.symbol or None,
-                    line_start=pending.region.line_start,
-                    line_end=pending.region.line_end,
-                    blob_sha=_blob_sha(workspace / pending.region.path),
-                ),
+                anchor=adapter.anchor(pending, workspace),
                 why=pending.why,
                 property=pending.property,
                 domain=pending.domain,
@@ -388,17 +371,6 @@ def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path)
         )
 
 
-def _blob_sha(path: Path) -> str:
-    """git's blob object id of the file as it is on disk. No placeholder.
-
-    While it was ``"0" * 40`` no anchor was verifiable against the tree.
-    """
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return "0" * 40
-    header = f"blob {len(data)}\0".encode("utf-8")
-    return hashlib.sha1(header + data).hexdigest()  # noqa: S324 - git's own format
 
 
 def _assert_tau_max_turns_none(harness: Any) -> None:
@@ -426,3 +398,14 @@ def _is_tool_start(event: Any) -> bool:
 
 def _tool_results(event: Any) -> list[Any]:
     return list(getattr(event, "tool_results", None) or [])
+
+
+# Legacy callers may still request these helpers; implementation lives in code.
+def git_diff(workspace):
+    from tau_intent.adapters.code import git_diff as implementation
+    return implementation(workspace)
+
+
+def _blob_sha(path):
+    from tau_intent.adapters.code import _blob_sha as implementation
+    return implementation(path)

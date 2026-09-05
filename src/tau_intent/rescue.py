@@ -30,9 +30,8 @@ GATILHOS = ("sempre", "ao_estourar")
 UNIDADES = ("bloco", "arquivo", "entrada")
 POLITICAS_DE_FALHA = ("degradar_sem_sumarizar",)
 
-# Static format registry; P6 moves ownership to the adapter registry.
-FORMATOS_ANCORA = {"code": r"[\w./\\%-]+::[\w.%-]+"}
-_ANCORA = re.compile("|".join(f"(?:{p})" for p in FORMATOS_ANCORA.values()))
+from tau_intent.adapters import REGISTRY
+_ANCORA = re.compile("|".join(f"(?:{r.anchor_format})" for r in REGISTRY.values()))
 
 
 @dataclass(frozen=True)
