@@ -171,7 +171,7 @@ class CodeAdapter:
 
     def anchor(self, pending, workspace):
         r = pending.region
-        return Anchor(file=r.path, symbol=r.symbol or pending.symbol or None,
+        return Anchor(file=r.path, symbol=r.symbol or None,
                       line_start=r.line_start, line_end=r.line_end,
                       blob_sha=_blob_sha(workspace / r.path))
 
@@ -187,3 +187,24 @@ class CodeAdapter:
 
     def classification(self, effect):
         return Path(effect.path).suffix.lstrip(".") or "sem-extensao"
+
+
+    def anchor_resolves(self, anchor, workspace):
+        target = workspace / anchor.file
+        if not target.is_file() or _blob_sha(target) != anchor.blob_sha:
+            return False
+        if anchor.symbol is None:
+            return True
+        return anchor.node_id() in simbolos_do_ast(
+            [Region(anchor.file, anchor.line_start, anchor.line_end)], workspace)
+
+    def validate(self, command, workspace):
+        """Run an explicitly supplied local argv; record the actual exit and output."""
+        import json
+        import subprocess
+        from tau_intent.checkpoint import ValidationEvidence
+        if not isinstance(command, (list, tuple)) or not command or not all(type(s) is str for s in command):
+            raise ValueError("validation command must be a non-empty argv")
+        result = subprocess.run(command, cwd=workspace, capture_output=True, text=True, check=False)
+        return ValidationEvidence(json.dumps(list(command)), json.dumps({
+            "returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}))

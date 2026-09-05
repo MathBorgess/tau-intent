@@ -113,7 +113,8 @@ class StateAdapter:
     size_unit='changed_keys'
     edge_types=('contains','depends_on')
 
-    def __init__(self, store: TypedStore, depends_on=()):
+    def __init__(self, store: TypedStore, depends_on=(), checks=None):
+        self.checks=dict(checks or {})
         self.store=store
         self.before=store.read()
         self.depends_on=tuple(depends_on)
@@ -173,3 +174,9 @@ class StateAdapter:
 
     def classification(self,effect):
         return effect.namespace
+
+
+    def validate(self, command):
+        """Re-runnable named assertion from the caller's frozen check registry."""
+        from tau_intent.checkpoint import ValidationEvidence
+        return ValidationEvidence(command, json.dumps({"passed": self.oracle(self.checks[command])}))

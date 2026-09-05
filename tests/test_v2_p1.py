@@ -31,3 +31,15 @@ class ResolverPremises(unittest.TestCase):
         v=portao([r],{r.key():p},set(),load_gate_config(),0)
         self.assertEqual(len(v.falhas),2)
         self.assertFalse(v.nao_avaliaveis)
+
+    def test_six_named_regions_stay_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=''.join(f'def f{i}():\n'+''.join('    pass\n' for _ in range(19))+'\n'*10 for i in range(6))
+            (Path(tmp)/'a.py').write_text(source)
+            rs=resolver_simbolos([Region('a.py',i*30+1,i*30+20,edited_lines=20) for i in range(6)],tmp)
+        self.assertEqual([r.symbol for r in rs],[f'f{i}' for i in range(6)])
+        ps={r.key():Pending(r,why='w',domain='d') for r in rs}
+        v=portao(rs,ps,{f'a.py::f{i}' for i in range(6)},load_gate_config(),3)
+        self.assertEqual(v.tipo,'PASSA')
+        self.assertFalse(v.falhas)
+        self.assertFalse(v.nao_avaliaveis)

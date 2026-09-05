@@ -29,3 +29,19 @@ class Retrieval(unittest.TestCase):
             self.assertEqual(store.path.read_bytes(),before)
             self.assertEqual(service.retrieve_learnings('unknown'),[])
             with self.assertRaises(ValueError):service.retrieve_learnings(query,-1)
+
+    def test_retrieval_reloads_predecessor_supersession(self):
+        from tau_intent.serve import IntentRetrieval
+        from tau_intent.adapters.state import TypedStore,StateAdapter,StateAnchor
+        from tau_intent.model import IntentEntry
+        from tau_intent.store import IntentStore
+        db=TypedStore({'ns':{'a':str}})
+        with tempfile.TemporaryDirectory() as tmp:
+            store=IntentStore(Path(tmp))
+            store.append(IntentEntry('old','ts','t',StateAnchor('ns','a','x'),'revoked','p','d'))
+            service=IntentRetrieval(store,StateAdapter(db),Path(tmp))
+            IntentStore(Path(tmp)).append(IntentEntry('new','ts2','t',StateAnchor('ns','a','y'),'current','p','d'))
+            blocks=service.retrieve_learnings('state://ns::a')
+            self.assertIn('current',blocks[0])
+            self.assertNotIn('revoked',blocks[0])
+            self.assertEqual(service.telemetry['servidas'],[{'id':'new','status':'current'}])

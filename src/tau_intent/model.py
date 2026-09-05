@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from tau_intent.checkpoint import Checkpoint
+from tau_intent.adapters import AnchoredIdentity
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class IntentEntry:
     id: str
     ts: str
     task_id: str
-    anchor: Anchor
+    anchor: AnchoredIdentity
     why: str
     property: str
     domain: str
