@@ -9,6 +9,19 @@ from tau_intent.collect import collect_events
 from tau_intent.neighbourhood import Graph
 
 
+def _validate_value(value):
+    if type(value) is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError('JSON object keys must be strings')
+            _validate_value(item)
+    elif type(value) is list:
+        for item in value:
+            _validate_value(item)
+    elif type(value) not in (str, int, float, bool, type(None)):
+        raise TypeError('store values must be JSON values')
+
+
 def _digest(present, value=None):
     data=json.dumps({'present':present,'value':value},sort_keys=True,ensure_ascii=False,
                     separators=(',',':'),allow_nan=False).encode()
@@ -40,7 +53,8 @@ class TypedStore:
         expected=self._schema[namespace][chave]
         if type(value) is not expected:
             raise TypeError(f'{namespace}/{chave}: expected {expected.__name__}')
-        _digest(True,value)  # JSON value only, finite and canonically hashable
+        _validate_value(value)
+        _digest(True,value)  # Reject nonfinite values before mutation
         self._values[namespace][chave]=deepcopy(value)
 
     def delete(self,namespace,chave):
@@ -99,6 +113,9 @@ class StateEffect:
 
     def key(self):
         return (self.namespace,self.chave)
+
+    def overlaps(self, other):
+        return isinstance(other, StateEffect) and self.key() == other.key()
 
     def span(self):
         return (1,1)

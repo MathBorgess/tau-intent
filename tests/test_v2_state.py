@@ -73,3 +73,26 @@ assert 'tau_intent.adapters.code_graph' not in sys.modules
         self.assertEqual(result.verdict,'NAO_AVALIAVEL')
         self.assertEqual(result.telemetry['modo'],'degradado-sem-testemunha')
         self.assertTrue(result.telemetry['codigos_nao_avaliaveis'])
+
+    def test_unannotated_sibling_key_is_missing_not_an_overlap(self):
+        from tau_intent.adapters.state import TypedStore,StateAdapter
+        from tau_intent.config import load_gate_config
+        from tau_intent.gate import portao
+        db=TypedStore({'ns':{'a':str,'b':str}})
+        adapter=StateAdapter(db)
+        db.set('ns','a','one');db.set('ns','b','two')
+        effects=adapter.effects(None)
+        pending=adapter.collect([{'tool_name':'record_intent','args':{'file':'state://ns','symbol':'a','why':'w','domain':'d'}}],effects,None)
+        v=portao(effects,pending,adapter.identities(effects,None),load_gate_config(),0)
+        self.assertEqual([f.code for f in v.falhas],['AUSENTE'])
+
+    def test_nested_values_must_be_unambiguous_json(self):
+        from tau_intent.adapters.state import TypedStore, StateAdapter
+        db = TypedStore({'ns': {'payload': dict}}, {'ns': {'payload': {'items': [1, None]}}})
+        adapter = StateAdapter(db)
+        for value in ({1: 'value'}, {'items': [{1: 'value'}]}, {'items': (1, 2)}):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                db.set('ns', 'payload', value)
+            self.assertEqual(adapter.effects(None), [])
+        db.set('ns', 'payload', {'items': [2, None]})
+        self.assertEqual(len(adapter.effects(None)), 1)

@@ -264,6 +264,9 @@ def _int_attr(region: object, name: str) -> int | None:
 
 
 def _ranges_overlap(left: object, right: object) -> bool:
+    overlap = getattr(left, "overlaps", None)
+    if callable(overlap):
+        return overlap(right)
     ls, le = _region_span(left)
     rs, re_ = _region_span(right)
     if (ls, le) == (0, 0) or (rs, re_) == (0, 0):

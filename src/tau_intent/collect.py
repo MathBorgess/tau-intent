@@ -224,6 +224,12 @@ def _schema_ok(name: str, args: Mapping[str, Any]) -> bool:
             if not isinstance(edit, dict) or "oldText" not in edit or "newText" not in edit:
                 return False
     if name == INTENT_TOOL:
+        if any(key in args and not isinstance(args[key], str)
+               for key in ("file", "path", "symbol", "why", "property", "domain")):
+            return False
+        if "files" in args and (not isinstance(args["files"], list)
+                                 or not all(isinstance(x, str) and x for x in args["files"])):
+            return False
         has_files = isinstance(args.get("files"), list) and any(args.get("files") or [])
         has_file = bool(args.get("file") or args.get("path"))
         return bool(has_file or has_files) and "why" in args

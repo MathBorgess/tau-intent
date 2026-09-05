@@ -67,3 +67,8 @@ class SatisfiableGate(unittest.TestCase):
             r=asyncio.run(run_task(root,Flags(True,True,False,False),harness=FakeHarness(script),diff=[Region('a.py',1,2)],gate_cfg=replace(load_gate_config(),n_max=0)))
             self.assertEqual(r.verdict,'ESCALAR')
             self.assertFalse((root/'intents.jsonl').exists())
+
+    def test_wrong_declared_field_type_is_malformed(self):
+        r=Region('a.py',1,2)
+        v=self.verdict([r],[{'tool_name':'record_intent','args':{'file':'a.py','why':{'not':'text'},'domain':'d'}}])
+        self.assertEqual(v.falhas[0].code,'NAO_PARSEAVEL')
