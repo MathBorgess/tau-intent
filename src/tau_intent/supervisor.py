@@ -215,7 +215,7 @@ async def run_task(
         tel["serve_sem_projecao"] = True
         tel["tokens_served"] = 0
     elif flags.serve:
-        projetar = project_fn or (lambda *args: _projetar_visao_derivada(*args, adapter=adapter))
+        projetar = project_fn or (lambda *args: _projetar_visao_derivada(*args, adapter=adapter, enunciado=prompt))
         bloco, proj_tel = projetar(
             workspace,
             current_entries,
@@ -360,7 +360,7 @@ def _projetar_visao_derivada(
     flags: Flags,
     superadas: int = 0,
     summarizer_fn: Callable[[str], Any] | None = None,
-    *, adapter: Adapter | None = None,
+    *, adapter: Adapter | None = None, enunciado: str = "",
 ) -> tuple[str, dict]:
     """Both measured arms project (H16). The knob that separates them is llm_rescue."""
     from dataclasses import replace
@@ -373,6 +373,8 @@ def _projetar_visao_derivada(
     adapter = adapter or get_adapter("code")
     cfg = replace(cfg, edge_types=adapter.edge_types)
     graph = adapter.neighbourhood(workspace)
+    if not ancoras:
+        ancoras = ancoras_da_tarefa([], graph, enunciado)
     if not ancoras:
         return "", {
             "llm_rescue": cfg.llm_rescue,
