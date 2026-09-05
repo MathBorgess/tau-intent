@@ -108,7 +108,7 @@ def portao(
                     else getattr(region, "resolver", "fornecido"))
         if resolver is None:
             nao_avaliaveis.extend(Falha(code, region, "fonte de identidades indisponível")
-                                  for code in CODIGOS[2:4])
+                                  for code in ("SIMBOLO_NAO_RESOLVIDO", "EDICAO_GRANDE_SEM_SIMBOLO"))
         pending = _lookup(pendentes, region)
         if pending is None:
             falhas.append(Falha("AUSENTE", region))
