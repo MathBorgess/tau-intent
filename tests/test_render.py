@@ -78,6 +78,7 @@ class TestRecibo(unittest.TestCase):
         self.assertEqual(
             recibo.as_dict(),
             {
+                "grafo_disponivel": True,
                 "entradas": 1,
                 "saltos_omitidos": 2,
                 "superadas_omitidas": 3,

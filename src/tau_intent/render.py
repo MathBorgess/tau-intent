@@ -24,6 +24,7 @@ from tau_intent.config import BlocoConfig, load_bloco_config
 class Recibo:
     """What the block leaves out, by reason."""
 
+    grafo_disponivel: bool = True
     entradas: int = 0
     saltos_omitidos: int = 0
     superadas_omitidas: int = 0
@@ -31,7 +32,8 @@ class Recibo:
 
     def vazio(self) -> bool:
         return not (
-            self.entradas
+            not self.grafo_disponivel
+            or self.entradas
             or self.saltos_omitidos
             or self.superadas_omitidas
             or self.cortadas_por_orcamento
@@ -43,10 +45,11 @@ class Recibo:
             f"{self.saltos_omitidos} nós alcançáveis não expandidos · "
             f"{self.superadas_omitidas} superadas omitidas · "
             f"{self.cortadas_por_orcamento} cortadas por orçamento"
-        )
+        ) + ("" if self.grafo_disponivel else "\nVizinhança: vizinhança indisponível; omissão não mensurável.")
 
     def as_dict(self) -> dict[str, int]:
         return {
+            "grafo_disponivel": self.grafo_disponivel,
             "entradas": self.entradas,
             "saltos_omitidos": self.saltos_omitidos,
             "superadas_omitidas": self.superadas_omitidas,
@@ -96,6 +99,7 @@ def render_block(
     escolhidas: Sequence[Any],
     cortadas: Sequence[Any] = (),
     *,
+    grafo_disponivel: bool = True,
     saltos_omitidos: int = 0,
     superadas_omitidas: int = 0,
     cfg: BlocoConfig | None = None,
@@ -103,6 +107,7 @@ def render_block(
     """The tagged envelope served to the agent. Same shape in B and in C."""
     cfg = cfg or load_bloco_config()
     recibo = Recibo(
+        grafo_disponivel=grafo_disponivel,
         entradas=len(escolhidas),
         saltos_omitidos=int(saltos_omitidos),
         superadas_omitidas=int(superadas_omitidas),

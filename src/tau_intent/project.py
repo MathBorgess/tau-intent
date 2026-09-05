@@ -142,7 +142,8 @@ def projetar(
         custo = max(count_tokens(render_entry(entry)), 1)
         scored.append((peso, custo, entry))
 
-    disponivel = budget - _custo_do_envelope()
+    grafo_disponivel = bool(graph.nodes) and all(a in graph.nodes for a in ancoras)
+    disponivel = budget - _custo_do_envelope(grafo_disponivel)
     if disponivel <= 0:
         # The envelope alone does not fit. Serving a receipt the agent did not
         # ask for, over budget, would break V4; suppressing it silently would
@@ -154,6 +155,7 @@ def projetar(
         suprimido = False
 
     recibo = Recibo(
+        grafo_disponivel=grafo_disponivel,
         entradas=len(escolhidas),
         saltos_omitidos=len(nao_expandidos),
         superadas_omitidas=int(superadas),
@@ -165,6 +167,7 @@ def projetar(
         else render_block(
             escolhidas,
             cortadas,
+            grafo_disponivel=recibo.grafo_disponivel,
             saltos_omitidos=recibo.saltos_omitidos,
             superadas_omitidas=recibo.superadas_omitidas,
         )
@@ -277,11 +280,11 @@ def _aplicar_rescue(
     return novo, tel
 
 
-def _custo_do_envelope() -> int:
+def _custo_do_envelope(grafo_disponivel: bool = True) -> int:
     """Tokens the tagged envelope, the notice and the receipt cost on their own."""
     # The receipt line has a fixed word count whatever the numbers are, so any
     # non-empty receipt gives the same overhead. An empty one renders nothing.
-    return count_tokens(envelope("", Recibo(entradas=1)))
+    return count_tokens(envelope("", Recibo(entradas=1, grafo_disponivel=grafo_disponivel)))
 
 
 def _guloso_com_fallback_singleton(
