@@ -189,7 +189,9 @@ def _lookup(pendentes: Mapping[object, object], region: object) -> object | None
     return None
 
 
-def _region_key(region: object) -> tuple[str, int, int]:
+def _region_key(region: object) -> tuple:
+    if callable(getattr(region, "key", None)):
+        return region.key()
     path = _region_path(region)
     start, end = _region_span(region)
     return (path, start, end)
@@ -208,6 +210,8 @@ def _region_path(region: object) -> str:
 
 
 def _region_span(region: object) -> tuple[int, int]:
+    if callable(getattr(region, "span", None)):
+        return region.span()
     start = getattr(region, "line_start", None)
     end = getattr(region, "line_end", None)
     if start is None:
@@ -230,6 +234,9 @@ def _region_size(region: object, cfg: GateConfig) -> int:
     ``contexto_diff`` on both sides, which is an estimate and is documented as
     one.
     """
+    units = _int_attr(region, "edited_units")
+    if units is not None:
+        return max(units, 0)
     exact = _int_attr(region, "edited_lines")
     if exact is None:
         exact = _int_attr(region, "linhas_editadas")

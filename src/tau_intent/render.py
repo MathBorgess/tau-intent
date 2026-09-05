@@ -84,7 +84,7 @@ def render_entry(entry: Any, cfg: BlocoConfig | None = None) -> str:
         "why": ("Por que", str(getattr(entry, "why", "") or "")),
         "domain": ("Domínio", str(getattr(entry, "domain", "") or "")),
     }
-    head = f"{file}::{symbol}" if symbol else file
+    head = anchor.node_id() if anchor is not None else ""
     lines = [head]
     for campo in cfg.ordem_dos_campos:
         if campo in {"file", "symbol"}:

@@ -390,7 +390,8 @@ def _recencias(entries: Sequence[Any]) -> dict[int, float]:
     """
     por_arquivo: dict[str, list[tuple[str, int]]] = {}
     for entry in entries:
-        file = str(getattr(getattr(entry, "anchor", None), "file", "") or "")
+        anchor = getattr(entry, "anchor", None)
+        file = anchor.scope_id() if callable(getattr(anchor, "scope_id", None)) else str(getattr(anchor, "file", "") or "")
         por_arquivo.setdefault(file, []).append(
             (str(getattr(entry, "ts", "") or ""), id(entry))
         )

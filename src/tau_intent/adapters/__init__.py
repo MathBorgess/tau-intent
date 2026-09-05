@@ -28,6 +28,8 @@ class Registration:
 
 
 REGISTRY = {
+    "state": Registration("tau_intent.adapters.state", "StateAdapter",
+                          r"state://[\w.%-]+::[\w.%-]+"),
     "code": Registration("tau_intent.adapters.code", "CodeAdapter",
                          r"[\w./\\%-]+::[\w.%-]+"),
 }
@@ -35,6 +37,51 @@ REGISTRY = {
 
 def get_adapter(name: str, **kwargs: Any) -> Adapter:
     if name not in REGISTRY:
-        raise ValueError(f"adaptador indisponível: {name}; efeito não verificável, modo degradado")
+        return UnavailableSubstrate(name)
     entry = REGISTRY[name]
     return getattr(import_module(entry.module), entry.factory)(**kwargs)
+
+
+def anchor_from_dict(data):
+    if set(data) == {"namespace", "chave", "value_hash"}:
+        from tau_intent.adapters.state import StateAnchor
+        return StateAnchor(**data)
+    from tau_intent.model import Anchor
+    return Anchor(**data)
+
+
+class UnavailableSubstrate:
+    """Declared degraded mode, deliberately absent from the adapter registry.
+
+    No independently observable effects means no captured evidence, no oracle
+    and no measurable gate verdict. Self-report is never promoted to a witness.
+    """
+    version = 'unavailable'
+    size_unit = 'unknown'
+    edge_types = ()
+    observable = False
+
+    def __init__(self, name):
+        self.name = name
+
+    def effects(self, workspace, supplied=None):
+        return []
+
+    def collect(self, events, effects, workspace):
+        return {}
+
+    def identities(self, effects, workspace):
+        return set()
+
+    def anchor(self, pending, workspace):
+        raise ValueError('no independent anchor witness')
+
+    def neighbourhood(self, workspace):
+        from tau_intent.neighbourhood import Graph
+        return Graph()
+
+    def oracle(self, check):
+        raise ValueError('no independent oracle')
+
+    def classification(self, effect):
+        return 'unknown'

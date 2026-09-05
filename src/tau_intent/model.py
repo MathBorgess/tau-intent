@@ -18,7 +18,7 @@ class Anchor:
         return f"{self.file}::{self.symbol}" if self.symbol else self.file
 
     def overlaps(self, other: "Anchor") -> bool:
-        if self.file != other.file:
+        if not isinstance(other, Anchor) or self.file != other.file:
             return False
         return self.line_start <= other.line_end and other.line_start <= self.line_end
 

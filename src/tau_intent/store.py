@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tau_intent.model import Anchor, IntentEntry
 from tau_intent.checkpoint import Checkpoint
+from tau_intent.adapters import anchor_from_dict
 
 
 class IntentStore:
@@ -73,13 +74,7 @@ def _entry_from_dict(data: dict) -> IntentEntry:
         id=data["id"],
         ts=data["ts"],
         task_id=data["task_id"],
-        anchor=Anchor(
-            file=raw_anchor["file"],
-            symbol=raw_anchor.get("symbol"),
-            line_start=raw_anchor["line_start"],
-            line_end=raw_anchor["line_end"],
-            blob_sha=raw_anchor["blob_sha"],
-        ),
+        anchor=anchor_from_dict(raw_anchor),
         why=data["why"],
         property=data.get("property") or "",
         domain=data.get("domain") or "",

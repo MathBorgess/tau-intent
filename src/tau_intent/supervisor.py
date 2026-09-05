@@ -239,6 +239,14 @@ async def run_task(
             if max_productive_turns is not None and productive >= max_productive_turns:
                 continue
             continue
+        if diff is None:
+            regions = adapter.effects(workspace)
+            if alvos_excluidos is None:
+                excluidos = sorted({r.path for r in regions if r.resolver is None})
+            conferir_resolvedores(regions, excluidos)
+        if not getattr(adapter, "observable", True):
+            verdict = "NAO_AVALIAVEL"
+            break
         if not flags.gate:
             verdict = "PASSA"
             break
@@ -279,6 +287,11 @@ async def run_task(
     tel["fracao_resolvida"] = tel["cobertura_de_captura"]["fracao_resolvida"]
     tel["denominadores"] = tel["cobertura_de_captura"]["denominadores"]
     tel.update(cobertura_distribuida(regions, depois, indisponiveis, excluidos, adapter))
+    if not getattr(adapter, "observable", True):
+        from tau_intent.gate import CODIGOS
+        tel["modo"] = "degradado-sem-testemunha"
+        tel["codigos_nao_avaliaveis"] = [
+            {"code": code, "alvo": "*", "detail": "efeito independente indisponível"} for code in CODIGOS]
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
