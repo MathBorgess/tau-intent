@@ -192,6 +192,7 @@ def projetar(
 
     if cfg.llm_rescue and summarizer_fn is not None and escolhidas:
         contexto = {
+            "orcamento_token": budget,
             "estourou": bool(cortadas),
             "cortadas": len(cortadas),
             "tokens_selecionados": tokens_selecionados,
@@ -219,6 +220,7 @@ def _aplicar_rescue(
     contaminates the contrast without showing up in the report.
     """
     corpo = "\n\n".join(render_entry(entry) for entry in escolhidas)
+    bloco = envelope(corpo, recibo)
     base: dict[str, Any] = {
         "llm_rescue": True,
         "llm_rescue_disparou": False,
@@ -277,6 +279,30 @@ def _aplicar_rescue(
         tel["llm_rescue_recall_de_simbolo"] = recall_de_simbolo(bloco, novo)
     except ImportError:  # pragma: no cover
         pass
+    from tau_intent.rescue import load_rescue_config, preservacoes_checaveis, simbolos_ancorados
+    cfg = getattr(summarizer_fn, "cfg", None) or load_rescue_config()
+    checks = preservacoes_checaveis(cfg, corpo, texto)
+    reasons = [name for name, ok in checks.items() if ok is False]
+    if cfg.proibir_invencao and simbolos_ancorados(texto) - simbolos_ancorados(corpo):
+        reasons.append("âncora inventada")
+    for entry in escolhidas:
+        if getattr(entry, "checkpoint", None) is not None:
+            rendered = render_entry(entry).split("  Checkpoint (evidência determinística):", 1)[1]
+            if rendered not in texto:
+                reasons.append("checkpoint determinístico alterado")
+    budget = (contexto or {}).get("orcamento_token")
+    if budget is not None and count_tokens(novo) > budget:
+        reasons.append("resumo excede orçamento")
+    if reasons:
+        from tau_intent.rescue import recall_de_simbolo
+        tel["llm_rescue_recall_rejeitado"] = tel.get("llm_rescue_recall_de_simbolo")
+        tel["llm_rescue_recall_de_simbolo"] = recall_de_simbolo(bloco, bloco)
+        tel.update({"llm_rescue_aplicado": False, "llm_rescue_falhou": True,
+                    "llm_rescue_erro": "; ".join(reasons),
+                    "llm_rescue_tokens_rejeitados": count_tokens(novo),
+                    "llm_rescue_tokens_depois": count_tokens(bloco),
+                    "llm_rescue_bloco_servido": bloco})
+        return bloco, tel
     return novo, tel
 
 
