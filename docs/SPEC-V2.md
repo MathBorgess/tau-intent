@@ -117,6 +117,17 @@ The block contract is unchanged: tagged envelope, the notice *"Evidência do his
 
 v2 adds **handoff between models** as a first-class configuration, not an out-of-scope arm: the record is produced under model M1 and served to model M2. The manifest stamps `modelo_produtor` and `modelo_consumidor` separately. Where they differ, every outcome is reported per pair — never pooled.
 
+## Documents the rebuild must produce
+
+The code is half the deliverable. Four documents are the other half, and one of them is the only place the experiment design will exist.
+
+| File | What it is |
+|---|---|
+| `docs/MECHANISM.md` | **The mental algorithm.** The mechanism end to end, in steps a human follows from memory without opening a file: what happens when a task starts, what triggers capture, what the gate looks at and in what order, what supersession decides, what the projection keeps and what it drops, what reaches the agent. One pass through the normal case, one through the degraded case. If it does not fit in roughly a page, the mechanism is more complicated than it needs to be — that is a finding, record it |
+| `docs/DELTA-V1.1-V2.md` | What the mechanism **could not** do and now can; what it **claimed** and no longer claims (the metrics that lied); what was **removed** and why; what stays the same on purpose. A "how to verify" column per row |
+| `docs/GATE-PROPOSAL.md` | A proposed improvement to the gate, written by whoever just rebuilt it. New code, code that should die, a change of unit or of evaluation order, or a reformulation of what the gate guarantees. Each with: what it catches that passes today · what it might block unfairly · does it survive with no model in the loop · does it hold outside code. **Nothing implemented without owner approval** |
+| Experiment briefing (in the vault) | How the experiment must be run: arms, substrates and which question each answers, recommended order, what to measure, what must never be pooled, stopping rules, owner decisions |
+
 ## Merge bar
 
 A PR does not merge if it: adds a runtime dependency · needs network in CI · suppresses a gate code without emitting `nao_avaliaveis` · returns `1.0` or `0.0` for an empty denominator · calibrates a threshold per language or per domain · names a type or config key after `python`/`ast`/`line` where an adapter-neutral name exists · changes `config_sha256` on a pure refactor · lands an adapter without its fixture · omits the one-line generality ADR from the PR body · pools results across producer/consumer model pairs.

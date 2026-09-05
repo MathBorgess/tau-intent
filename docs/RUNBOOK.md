@@ -1,4 +1,6 @@
-# Runbook — how to execute each substrate
+# Runbook — how each substrate must be executed
+
+> **This is the experiment design, not a task list.** Nobody runs a benchmark during the reconstruction phase. This file exists so that the design is *written down* rather than living in the head of whoever rebuilt the mechanism — the execution happens later, after the G2 freeze, and possibly by someone else. An agent rebuilding the mechanism reads this to know what the mechanism must support, and stops there.
 
 Companion to `docs/TASK-CATALOG.md`, which says *what* can be tested and what to expect. This says *how*. Nothing here overrides `AGENTS.md` or the pre-registration in the vault.
 
