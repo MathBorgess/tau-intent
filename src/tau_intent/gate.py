@@ -106,9 +106,13 @@ def portao(
     for region in regions:
         resolver = (region.get("resolver", "fornecido") if isinstance(region, dict)
                     else getattr(region, "resolver", "fornecido"))
+        fina_disponivel = resolver is not None and (bool(_region_symbol(region)) or resolver == "fornecido")
         if resolver is None:
             nao_avaliaveis.extend(Falha(code, region, "fonte de identidades indisponível")
                                   for code in ("SIMBOLO_NAO_RESOLVIDO", "EDICAO_GRANDE_SEM_SIMBOLO"))
+        elif not fina_disponivel:
+            nao_avaliaveis.append(Falha("EDICAO_GRANDE_SEM_SIMBOLO", region,
+                                       "efeito sem identidade fina observável"))
         pending = _lookup(pendentes, region)
         if pending is None:
             falhas.append(Falha("AUSENTE", region))
@@ -126,7 +130,7 @@ def portao(
             falhas.append(Falha("SIMBOLO_NAO_RESOLVIDO", region, symbol))
 
         total = totais[_chave_edicao(region)]
-        if resolver is not None and total > cfg.limiar_edicao and not resolvido:
+        if fina_disponivel and total > cfg.limiar_edicao and not resolvido:
             falhas.append(
                 Falha(
                     "EDICAO_GRANDE_SEM_SIMBOLO",
@@ -289,6 +293,9 @@ def _detail_raw(pending: object) -> str:
 def _resolve(symbol: str, region: object, known: set[str]) -> bool:
     """Does ``symbol`` resolve inside ``region``'s file, per the AST table?"""
     if not symbol:
+        return False
+    witnessed = _region_symbol(region)
+    if witnessed and symbol != witnessed:
         return False
     if symbol in known:
         return True

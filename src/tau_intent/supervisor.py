@@ -165,6 +165,8 @@ async def run_task(
     gate_cfg = gate_cfg or load_gate_config()
     bloco_cfg = bloco_cfg or load_bloco_config()
     gate_fn = gate_fn or portao
+    if max_productive_turns is not None and max_productive_turns < 1:
+        raise ValueError("productive turn cap must be positive or None")
 
     if flags.llm_rescue and flags.serve and flags.project and summarizer_fn is None:
         # Arm C without a summariser would run as arm B and say nothing. v1 has
@@ -237,7 +239,9 @@ async def run_task(
     collected_events: list[Any] = []
     productive = 0
     blocks = 0
-    verdict = "PASSA"
+    verdict = "NAO_AVALIAVEL" if flags.gate else "PASSA"
+    tel["gate_avaliado"] = False
+    tel["esbarrou_teto"] = False
     follow_ups: list[str] = []
 
     async for event in harness.prompt(prompt_text):
@@ -249,7 +253,9 @@ async def run_task(
         if _tool_results(event):
             productive += 1
             if max_productive_turns is not None and productive >= max_productive_turns:
-                continue
+                tel["esbarrou_teto"] = True
+                verdict = "TETO"
+                break
             continue
         if diff is None:
             regions = adapter.effects(workspace)
@@ -270,6 +276,7 @@ async def run_task(
             gate_cfg,
             blocks,
         )
+        tel["gate_avaliado"] = True
         indisponiveis = list(v.nao_avaliaveis)
         verdict = v.tipo
         if v.tipo == "BLOQUEIA":
@@ -280,13 +287,21 @@ async def run_task(
             continue
         break
 
+    if diff is None:
+        regions = adapter.effects(workspace)
+        if alvos_excluidos is None:
+            excluidos = sorted({r.path for r in regions if r.resolver is None})
+        conferir_resolvedores(regions, excluidos)
     pendentes = adapter.collect(collected_events, regions, workspace)
 
     checkpoint = checkpoint_source(regions) if checkpoint_source is not None else None
     if checkpoint is not None:
         if checkpoint.changed_targets != tuple(sorted({r.node_id() for r in regions})):
             raise ValueError("checkpoint targets differ from independently observed effects")
-    if flags.capture and store is not None:
+    publicar = flags.capture and (not flags.gate or (tel["gate_avaliado"] and verdict == "PASSA"))
+    tel["captura_publicada"] = publicar
+    tel["pendencias_nao_publicadas"] = len(pendentes) if flags.capture and not publicar else 0
+    if publicar and store is not None:
         _flush_pendentes(store, pendentes, task_id, workspace, adapter, checkpoint)
     elif not flags.capture:
         after = _line_count(intents_path)
@@ -304,6 +319,8 @@ async def run_task(
         tel["modo"] = "degradado-sem-testemunha"
         tel["codigos_nao_avaliaveis"] = [
             {"code": code, "alvo": "*", "detail": "efeito independente indisponível"} for code in CODIGOS]
+    from tau_intent.collect import diagnosticos_de_captura
+    tel["erros_de_captura"] = diagnosticos_de_captura(collected_events)
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive

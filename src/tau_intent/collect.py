@@ -116,7 +116,7 @@ def collect_events(
         args, raw, unparseable = _tool_args(event)
         if name in WRITE_TOOLS or name == INTENT_TOOL or name == BASH_TOOL:
             paths = _paths_from_args(name, args)
-            if unparseable or not paths:
+            if unparseable or (not paths and name != BASH_TOOL):
                 unparseable = True
             matched: list[Region] = []
             seen: set[tuple[str, int, int]] = set()
@@ -126,12 +126,7 @@ def collect_events(
                     if key not in seen:
                         seen.add(key)
                         matched.append(region)
-            if not matched and paths:
-                for path in paths:
-                    region = Region(path=path, line_start=0, line_end=0)
-                    matched.append(region)
-                    by_path.setdefault(path, []).append(region)
-            elif not matched and not paths:
+            if not matched and not paths:
                 matched = [region for group in by_path.values() for region in group]
             if name == INTENT_TOOL:
                 matched = _restringir_ao_simbolo(
@@ -143,11 +138,13 @@ def collect_events(
                 if unparseable:
                     pending.unparseable = True
                     pending.raw_arguments = raw
-                if name == INTENT_TOOL:
-                    pending.why = str(args.get("why") or pending.why)
-                    pending.property = str(args.get("property") or pending.property)
-                    pending.domain = str(args.get("domain") or pending.domain)
-                    pending.symbol = str(args.get("symbol") or pending.symbol)
+                if name == INTENT_TOOL and not unparseable:
+                    pending.unparseable = False
+                    pending.raw_arguments = None
+                    pending.why = str(args.get("why") or "")
+                    pending.property = str(args.get("property") or "")
+                    pending.domain = str(args.get("domain") or "")
+                    pending.symbol = str(args.get("symbol") or "")
                     pending.claimed_regions = max(len(matched), 1)
                     if pending.intent_turn is None:
                         pending.intent_turn = ordinal
@@ -200,7 +197,9 @@ def _tool_name(event: Any) -> str:
 def _tool_args(event: Any) -> tuple[dict[str, Any], Any, bool]:
     if isinstance(event, dict):
         raw = event.get("_raw_arguments")
-        args = event.get("args") or event.get("arguments") or {}
+        args = event.get("args", event.get("arguments", {}))
+        if not isinstance(args, dict):
+            return {}, raw if raw is not None else args, True
         unparseable = raw is not None or not _schema_ok(_tool_name(event), args)
         return dict(args), raw, unparseable
     raw = getattr(event, "_raw_arguments", None)
@@ -281,3 +280,16 @@ def resolver_simbolos(regions, workspace):
 def simbolos_do_ast(regions, workspace):
     from tau_intent.adapters.code import simbolos_do_ast as implementation
     return implementation(regions, workspace)
+
+
+def diagnosticos_de_captura(events):
+    """Historical rejected calls remain visible after a valid replacement."""
+    rejected = []
+    for ordinal, event in enumerate(events):
+        name = _tool_name(event)
+        if name not in WRITE_TOOLS | {INTENT_TOOL, BASH_TOOL}:
+            continue
+        args, _, invalid = _tool_args(event)
+        if invalid or (name != BASH_TOOL and not _paths_from_args(name, args)):
+            rejected.append({"evento": ordinal, "tool": name, "code": "NAO_PARSEAVEL"})
+    return rejected
