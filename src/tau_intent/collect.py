@@ -20,7 +20,6 @@ parse it.
 
 from __future__ import annotations
 
-import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,9 +29,6 @@ WRITE_TOOLS = frozenset({"write", "edit"})
 INTENT_TOOL = "record_intent"
 BASH_TOOL = "bash"
 
-_HUNK = re.compile(r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@")
-_DIFF_GIT = re.compile(r"^diff --git a/.+ b/(.+)$")
-_PLUS_PLUS = re.compile(r"^\+\+\+ (?:b/)?(.+)$")
 _REDIRECT = re.compile(r"(?:>>?|tee(?:\s+-a)?)\s+([^\s|;]+)")
 
 
@@ -49,6 +45,9 @@ class Region:
     #: evidence, not identity: the line range is what git gives, the symbol is
     #: what survives a reformat.
     symbol: str | None = None
+    #: Identity witness supplied by caller, or stamped by the resolver.
+    resolver: str | None = "fornecido"
+    size_unit: str = "edited_lines"
 
     def __post_init__(self) -> None:
         if not self.size:
@@ -83,111 +82,12 @@ class Pending:
     intent_turn: int | None = None
 
 
-def regions_from_diff(diff: str | Iterable[Region]) -> list[Region]:
-    """Parse a unified git diff, or pass through an already-built region list.
-
-    Records both the hunk length (``size``) and the number of added/changed
-    lines (``edited_lines``). The second is what ``limiar_edicao`` was always
-    supposed to mean (D7): a 44-line hunk with 3 lines of context each side is
-    a 38-line edit, and only the exact count says so.
-    """
-    if not isinstance(diff, str):
-        return list(diff)
-    regions: list[Region] = []
-    path = ""
-    current: Region | None = None
-    for line in diff.splitlines():
-        git = _DIFF_GIT.match(line)
-        if git:
-            path = git.group(1)
-            current = None
-            continue
-        if line.startswith("--- ") or line.startswith("+++ "):
-            plus = _PLUS_PLUS.match(line)
-            if plus and plus.group(1) != "/dev/null":
-                path = plus.group(1)
-            current = None
-            continue
-        hunk = _HUNK.match(line)
-        if hunk and path:
-            start = int(hunk.group(1))
-            count = int(hunk.group(2) or "1")
-            end = start + max(count, 1) - 1
-            current = Region(
-                path=path, line_start=start, line_end=end, size=count, edited_lines=0
-            )
-            regions.append(current)
-            continue
-        if current is not None and line[:1] in {"+", "-"}:
-            current.edited_lines = (current.edited_lines or 0) + 1
-    return regions
 
 
-def resolver_simbolo(source: str, line_start: int, line_end: int) -> str | None:
-    """Innermost def/class of ``source`` that contains the whole line range.
-
-    Read-only use of the AST, same parser ``graph.py`` builds its nodes with.
-    No user code is executed and no file is written.
-    """
-    try:
-        tree = ast.parse(source)
-    except (SyntaxError, ValueError):
-        return None
-    best: tuple[int, str] | None = None
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        end = getattr(node, "end_lineno", None) or node.lineno
-        if node.lineno <= line_start and line_end <= end:
-            span = end - node.lineno
-            if best is None or span < best[0]:
-                best = (span, node.name)
-    return best[1] if best else None
 
 
-def resolver_simbolos(regions: Iterable[Region], workspace: Path | str | None) -> list[Region]:
-    """Fill ``Region.symbol`` from the post-edit tree. Idempotent, in place."""
-    if workspace is None:
-        return list(regions)
-    root = Path(workspace)
-    cache: dict[str, str | None] = {}
-    out = []
-    for region in regions:
-        if region.path not in cache:
-            candidate = root / region.path
-            try:
-                cache[region.path] = candidate.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                cache[region.path] = None
-        source = cache[region.path]
-        if source is not None:
-            region.symbol = resolver_simbolo(source, region.line_start, region.line_end)
-        out.append(region)
-    return out
 
 
-def simbolos_do_ast(regions: Iterable[Region], workspace: Path | str | None) -> set[str]:
-    """The symbol table the gate validates ``record_intent.symbol`` against.
-
-    Node ids in ``file::symbol`` shape, for every def/class of every file the
-    diff touched. This is what replaces the supervisor's old
-    ``_symbols_from_pending``, which built the known set by scraping the very
-    property texts it was supposed to check (D2).
-    """
-    if workspace is None:
-        return set()
-    root = Path(workspace)
-    nomes: set[str] = set()
-    for path in {region.path for region in regions}:
-        try:
-            source = (root / path).read_text(encoding="utf-8")
-            tree = ast.parse(source)
-        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
-            continue
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                nomes.add(f"{path}::{node.name}")
-    return nomes
 
 
 def collect_events(
@@ -216,7 +116,7 @@ def collect_events(
         args, raw, unparseable = _tool_args(event)
         if name in WRITE_TOOLS or name == INTENT_TOOL or name == BASH_TOOL:
             paths = _paths_from_args(name, args)
-            if unparseable or not paths:
+            if unparseable or (not paths and name != BASH_TOOL):
                 unparseable = True
             matched: list[Region] = []
             seen: set[tuple[str, int, int]] = set()
@@ -226,12 +126,7 @@ def collect_events(
                     if key not in seen:
                         seen.add(key)
                         matched.append(region)
-            if not matched and paths:
-                for path in paths:
-                    region = Region(path=path, line_start=0, line_end=0)
-                    matched.append(region)
-                    by_path.setdefault(path, []).append(region)
-            elif not matched and not paths:
+            if not matched and not paths:
                 matched = [region for group in by_path.values() for region in group]
             if name == INTENT_TOOL:
                 matched = _restringir_ao_simbolo(
@@ -243,11 +138,13 @@ def collect_events(
                 if unparseable:
                     pending.unparseable = True
                     pending.raw_arguments = raw
-                if name == INTENT_TOOL:
-                    pending.why = str(args.get("why") or pending.why)
-                    pending.property = str(args.get("property") or pending.property)
-                    pending.domain = str(args.get("domain") or pending.domain)
-                    pending.symbol = str(args.get("symbol") or pending.symbol)
+                if name == INTENT_TOOL and not unparseable:
+                    pending.unparseable = False
+                    pending.raw_arguments = None
+                    pending.why = str(args.get("why") or "")
+                    pending.property = str(args.get("property") or "")
+                    pending.domain = str(args.get("domain") or "")
+                    pending.symbol = str(args.get("symbol") or "")
                     pending.claimed_regions = max(len(matched), 1)
                     if pending.intent_turn is None:
                         pending.intent_turn = ordinal
@@ -300,7 +197,9 @@ def _tool_name(event: Any) -> str:
 def _tool_args(event: Any) -> tuple[dict[str, Any], Any, bool]:
     if isinstance(event, dict):
         raw = event.get("_raw_arguments")
-        args = event.get("args") or event.get("arguments") or {}
+        args = event.get("args", event.get("arguments", {}))
+        if not isinstance(args, dict):
+            return {}, raw if raw is not None else args, True
         unparseable = raw is not None or not _schema_ok(_tool_name(event), args)
         return dict(args), raw, unparseable
     raw = getattr(event, "_raw_arguments", None)
@@ -325,6 +224,12 @@ def _schema_ok(name: str, args: Mapping[str, Any]) -> bool:
             if not isinstance(edit, dict) or "oldText" not in edit or "newText" not in edit:
                 return False
     if name == INTENT_TOOL:
+        if any(key in args and not isinstance(args[key], str)
+               for key in ("file", "path", "symbol", "why", "property", "domain")):
+            return False
+        if "files" in args and (not isinstance(args["files"], list)
+                                 or not all(isinstance(x, str) and x for x in args["files"])):
+            return False
         has_files = isinstance(args.get("files"), list) and any(args.get("files") or [])
         has_file = bool(args.get("file") or args.get("path"))
         return bool(has_file or has_files) and "why" in args
@@ -358,3 +263,39 @@ def _apply_edit_size(pending: Pending, args: Mapping[str, Any]) -> None:
         for edit in edits:
             if isinstance(edit, dict):
                 pending.bytes += len(str(edit.get("newText") or ""))
+
+
+# Compatibility imports are lazy: non-code capture never imports the code witness.
+def regions_from_diff(diff):
+    from tau_intent.adapters.code import regions_from_diff as implementation
+    return implementation(diff)
+
+
+def resolver_simbolo(source, line_start, line_end):
+    from tau_intent.adapters.code import resolver_simbolo as implementation
+    return implementation(source, line_start, line_end)
+
+
+def resolver_simbolos(regions, workspace):
+    if workspace is None:
+        return list(regions)
+    from tau_intent.adapters.code import resolver_simbolos as implementation
+    return implementation(regions, workspace)
+
+
+def simbolos_do_ast(regions, workspace):
+    from tau_intent.adapters.code import simbolos_do_ast as implementation
+    return implementation(regions, workspace)
+
+
+def diagnosticos_de_captura(events):
+    """Historical rejected calls remain visible after a valid replacement."""
+    rejected = []
+    for ordinal, event in enumerate(events):
+        name = _tool_name(event)
+        if name not in WRITE_TOOLS | {INTENT_TOOL, BASH_TOOL}:
+            continue
+        args, _, invalid = _tool_args(event)
+        if invalid or (name != BASH_TOOL and not _paths_from_args(name, args)):
+            rejected.append({"evento": ordinal, "tool": name, "code": "NAO_PARSEAVEL"})
+    return rejected

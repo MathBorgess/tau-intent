@@ -13,8 +13,7 @@ arm's path (D1). It stayed an inspection tool in ``render.py``.
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -31,7 +30,8 @@ from tau_intent.collect import (
 from tau_intent.config import BlocoConfig, load_bloco_config, load_gate_config
 from tau_intent.fake_provider import FakeHarness
 from tau_intent.gate import GateConfig, Veredito, portao
-from tau_intent.model import Anchor, IntentEntry
+from tau_intent.model import IntentEntry
+from tau_intent.adapters import Adapter, get_adapter
 from tau_intent.render import render_falhas
 from tau_intent.store import IntentStore
 from tau_intent.telemetry import (
@@ -70,19 +70,9 @@ class RunResult:
     intents_path: Path
     telemetry: dict[str, Any]
     bloco: str = ""
+    manifest: dict[str, Any] = field(default_factory=dict)
 
 
-def git_diff(workspace: Path) -> str:
-    import subprocess
-
-    proc = subprocess.run(
-        ["git", "diff", "--no-color", "HEAD"],
-        cwd=workspace,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return proc.stdout or ""
 
 
 def montar(
@@ -162,13 +152,21 @@ async def run_task(
     gate_fn: Callable[..., Veredito] | None = None,
     project_fn: Callable[..., tuple[str, dict]] | None = None,
     summarizer_fn: Callable[[str], Any] | None = None,
+    alvos_excluidos: list[str] | None = None,
+    adapter: Adapter | str = "code",
+    checkpoint_source: Callable[[list], Any] | None = None,
+    modelo_produtor: str | None = None,
+    modelo_consumidor: str | None = None,
 ) -> RunResult:
+    adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
     intents_path = workspace / "intents.jsonl"
     before_lines = _line_count(intents_path)
     gate_cfg = gate_cfg or load_gate_config()
     bloco_cfg = bloco_cfg or load_bloco_config()
     gate_fn = gate_fn or portao
+    if max_productive_turns is not None and max_productive_turns < 1:
+        raise ValueError("productive turn cap must be positive or None")
 
     if flags.llm_rescue and flags.serve and flags.project and summarizer_fn is None:
         # Arm C without a summariser would run as arm B and say nothing. v1 has
@@ -182,16 +180,26 @@ async def run_task(
     if harness is None:
         harness = FakeHarness(max_turns=None, tools=tools)
     _assert_tau_max_turns_none(harness)
+    modelo_consumidor = modelo_consumidor or getattr(harness, "model_id", None)
+    if modelo_consumidor is None and isinstance(harness, FakeHarness):
+        modelo_consumidor = "fake-provider-v1"
+    modelo_produtor = modelo_produtor or modelo_consumidor
+    if not modelo_produtor or not modelo_consumidor:
+        raise ValueError("a execução exige modelo_produtor e modelo_consumidor")
 
     # Regions come first: they are the anchors of the derived view (D3). Their
     # symbols are resolved here, before serving, so the anchor is (file, symbol)
     # and not merely the file — otherwise the projection loses the precision the
     # graph has, at the one moment it matters.
-    regions = resolver_simbolos(
-        regions_from_diff(diff if diff is not None else git_diff(workspace)), workspace
-    )
+    regions = adapter.effects(workspace, diff)
 
-    tel: dict[str, Any] = {"tokenizer": "whitespace-v1"}
+    from tau_intent.manifest import conferir_resolvedores, cobertura_distribuida
+    excluidos = (sorted({r.path for r in regions if r.resolver is None})
+                 if alvos_excluidos is None else list(alvos_excluidos))
+    conferir_resolvedores(regions, excluidos)
+    indisponiveis = []
+    tel: dict[str, Any] = {"tokenizer": "whitespace-v1",
+                           "edge_types_efetivos": [], "grafo_heterogeneo": False}
     current_entries: list[Any] = []
     if store is None:
         store = IntentStore(workspace)
@@ -207,7 +215,7 @@ async def run_task(
         tel["serve_sem_projecao"] = True
         tel["tokens_served"] = 0
     elif flags.serve:
-        projetar = project_fn or _projetar_visao_derivada
+        projetar = project_fn or (lambda *args: _projetar_visao_derivada(*args, adapter=adapter, enunciado=prompt))
         bloco, proj_tel = projetar(
             workspace,
             current_entries,
@@ -219,6 +227,9 @@ async def run_task(
         servidas = list(proj_tel.pop("servidas", []))
         tel.update(proj_tel)
         tel.setdefault("tokens_served", count_tokens(bloco))
+    tel["servidas"] = [{"id": e.id, "status": "current"} for e in servidas]
+    tel["modelo_produtor"] = modelo_produtor
+    tel["modelo_consumidor"] = modelo_consumidor
     tel["bloco_vazio"] = not bloco.strip()
 
     prompt_text = montar(prompt_base, prompt, bloco, bloco_cfg)
@@ -228,7 +239,9 @@ async def run_task(
     collected_events: list[Any] = []
     productive = 0
     blocks = 0
-    verdict = "PASSA"
+    verdict = "NAO_AVALIAVEL" if flags.gate else "PASSA"
+    tel["gate_avaliado"] = False
+    tel["esbarrou_teto"] = False
     follow_ups: list[str] = []
 
     async for event in harness.prompt(prompt_text):
@@ -240,19 +253,31 @@ async def run_task(
         if _tool_results(event):
             productive += 1
             if max_productive_turns is not None and productive >= max_productive_turns:
-                continue
+                tel["esbarrou_teto"] = True
+                verdict = "TETO"
+                break
             continue
+        if diff is None:
+            regions = adapter.effects(workspace)
+            if alvos_excluidos is None:
+                excluidos = sorted({r.path for r in regions if r.resolver is None})
+            conferir_resolvedores(regions, excluidos)
+        if not getattr(adapter, "observable", True):
+            verdict = "NAO_AVALIAVEL"
+            break
         if not flags.gate:
             verdict = "PASSA"
             break
-        pendentes = collect_events(collected_events, regions, workspace)
+        pendentes = adapter.collect(collected_events, regions, workspace)
         v = gate_fn(
             regions,
             pendentes,
-            symbols if symbols is not None else simbolos_do_ast(regions, workspace),
+            symbols if symbols is not None else adapter.identities(regions, workspace),
             gate_cfg,
             blocks,
         )
+        tel["gate_avaliado"] = True
+        indisponiveis = list(v.nao_avaliaveis)
         verdict = v.tipo
         if v.tipo == "BLOQUEIA":
             blocks += 1
@@ -262,10 +287,22 @@ async def run_task(
             continue
         break
 
-    pendentes = collect_events(collected_events, regions, workspace)
+    if diff is None:
+        regions = adapter.effects(workspace)
+        if alvos_excluidos is None:
+            excluidos = sorted({r.path for r in regions if r.resolver is None})
+        conferir_resolvedores(regions, excluidos)
+    pendentes = adapter.collect(collected_events, regions, workspace)
 
-    if flags.capture and store is not None:
-        _flush_pendentes(store, pendentes, task_id, workspace)
+    checkpoint = checkpoint_source(regions) if checkpoint_source is not None else None
+    if checkpoint is not None:
+        if checkpoint.changed_targets != tuple(sorted({r.node_id() for r in regions})):
+            raise ValueError("checkpoint targets differ from independently observed effects")
+    publicar = flags.capture and (not flags.gate or (tel["gate_avaliado"] and verdict == "PASSA"))
+    tel["captura_publicada"] = publicar
+    tel["pendencias_nao_publicadas"] = len(pendentes) if flags.capture and not publicar else 0
+    if publicar and store is not None:
+        _flush_pendentes(store, pendentes, task_id, workspace, adapter, checkpoint)
     elif not flags.capture:
         after = _line_count(intents_path)
         if after > before_lines:
@@ -273,12 +310,23 @@ async def run_task(
 
     depois = list(store.current()) if store is not None else []
     tel["cobertura_de_captura"] = cobertura_de_captura(regions, depois)
-    tel["cobertura_efetiva"] = tel["cobertura_de_captura"]
+    tel["cobertura_efetiva"] = tel["cobertura_de_captura"]["estrita"]
+    tel["fracao_resolvida"] = tel["cobertura_de_captura"]["fracao_resolvida"]
+    tel["denominadores"] = tel["cobertura_de_captura"]["denominadores"]
+    tel.update(cobertura_distribuida(regions, depois, indisponiveis, excluidos, adapter))
+    if not getattr(adapter, "observable", True):
+        from tau_intent.gate import CODIGOS
+        tel["modo"] = "degradado-sem-testemunha"
+        tel["codigos_nao_avaliaveis"] = [
+            {"code": code, "alvo": "*", "detail": "efeito independente indisponível"} for code in CODIGOS]
+    from tau_intent.collect import diagnosticos_de_captura
+    tel["erros_de_captura"] = diagnosticos_de_captura(collected_events)
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
     tel["block_turns"] = blocks
     tel["max_turns_on_tau"] = None
+    from tau_intent.manifest import manifest_da_execucao
     return RunResult(
         flags=flags,
         productive_turns=productive,
@@ -288,6 +336,7 @@ async def run_task(
         intents_path=intents_path,
         telemetry=tel,
         bloco=bloco,
+        manifest=manifest_da_execucao(flags, tel),
     )
 
 
@@ -311,17 +360,21 @@ def _projetar_visao_derivada(
     flags: Flags,
     superadas: int = 0,
     summarizer_fn: Callable[[str], Any] | None = None,
+    *, adapter: Adapter | None = None, enunciado: str = "",
 ) -> tuple[str, dict]:
     """Both measured arms project (H16). The knob that separates them is llm_rescue."""
     from dataclasses import replace
 
-    from tau_intent.graph import build_cached
     from tau_intent.project import load_project_config, projetar
 
     cfg = load_project_config()
     if flags.llm_rescue != cfg.llm_rescue:
         cfg = replace(cfg, llm_rescue=flags.llm_rescue)
-    graph = build_cached(str(workspace), "worktree")
+    adapter = adapter or get_adapter("code")
+    cfg = replace(cfg, edge_types=adapter.edge_types)
+    graph = adapter.neighbourhood(workspace)
+    if not ancoras:
+        ancoras = ancoras_da_tarefa([], graph, enunciado)
     if not ancoras:
         return "", {
             "llm_rescue": cfg.llm_rescue,
@@ -337,12 +390,16 @@ def _projetar_visao_derivada(
         superadas=superadas,
         summarizer_fn=summarizer_fn,
     )
+    tel["edge_types_efetivos"] = sorted({key for edges in graph._out.values() for _,key in edges})
+    tel["grafo_heterogeneo"] = len(tel["edge_types_efetivos"]) > 1
     tel["ancoras"] = list(ancoras)
     tel["ancoras_vazias"] = False
     return bloco, tel
 
 
-def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path) -> None:
+def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path,
+                     adapter: Adapter | None = None, checkpoint: Any = None) -> None:
+    adapter = adapter or get_adapter("code")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for pending in pendentes.values():
         if not isinstance(pending, Pending):
@@ -356,36 +413,16 @@ def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path)
                 id=str(uuid4()),
                 ts=now,
                 task_id=task_id,
-                anchor=Anchor(
-                    file=pending.region.path,
-                    # Store identity is the hunk's AST (G-3). Declared
-                    # ``Pending.symbol`` is gate-only: a record_intent that
-                    # spans helpers must not stamp every line with the name
-                    # the agent typed for validation.
-                    symbol=pending.region.symbol or pending.symbol or None,
-                    line_start=pending.region.line_start,
-                    line_end=pending.region.line_end,
-                    blob_sha=_blob_sha(workspace / pending.region.path),
-                ),
+                anchor=adapter.anchor(pending, workspace),
                 why=pending.why,
                 property=pending.property,
                 domain=pending.domain,
                 trigger_log=tuple(pending.trigger_log),
+                checkpoint=checkpoint,
             )
         )
 
 
-def _blob_sha(path: Path) -> str:
-    """git's blob object id of the file as it is on disk. No placeholder.
-
-    While it was ``"0" * 40`` no anchor was verifiable against the tree.
-    """
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return "0" * 40
-    header = f"blob {len(data)}\0".encode("utf-8")
-    return hashlib.sha1(header + data).hexdigest()  # noqa: S324 - git's own format
 
 
 def _assert_tau_max_turns_none(harness: Any) -> None:
@@ -413,3 +450,14 @@ def _is_tool_start(event: Any) -> bool:
 
 def _tool_results(event: Any) -> list[Any]:
     return list(getattr(event, "tool_results", None) or [])
+
+
+# Legacy callers may still request these helpers; implementation lives in code.
+def git_diff(workspace):
+    from tau_intent.adapters.code import git_diff as implementation
+    return implementation(workspace)
+
+
+def _blob_sha(path):
+    from tau_intent.adapters.code import _blob_sha as implementation
+    return implementation(path)

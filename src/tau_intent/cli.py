@@ -40,6 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace", type=Path, default=Path("."))
     parser.add_argument("--prompt", default="implement the task")
     parser.add_argument("--task-id", default="task")
+    parser.add_argument("--modelo-produtor")
+    parser.add_argument("--modelo-consumidor")
+    parser.add_argument("--manifest", type=Path, help="Write the execution manifest as JSON")
     parser.add_argument("--max-productive-turns", type=int, default=8)
     parser.add_argument(
         "--fake-provider",
@@ -121,8 +124,13 @@ def main(argv: list[str] | None = None) -> int:
             diff=diff,
             symbols=symbols,
             summarizer_fn=summarizer,
+            modelo_produtor=args.modelo_produtor,
+            modelo_consumidor=args.modelo_consumidor,
         )
     )
+    if args.manifest is not None:
+        import json
+        args.manifest.write_text(json.dumps(result.manifest, ensure_ascii=False, indent=2) + "\n")
     print(
         f"verdict={result.verdict} productive={result.productive_turns} "
         f"blocks={result.block_turns} capture={flags.capture} gate={flags.gate} "

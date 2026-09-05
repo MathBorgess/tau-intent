@@ -7,6 +7,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from tau_intent.model import Anchor, IntentEntry
+from tau_intent.checkpoint import Checkpoint
+from tau_intent.adapters import anchor_from_dict
 
 
 class IntentStore:
@@ -45,7 +47,10 @@ class IntentStore:
         nova = replace(nova, supersedes=tuple(sobrepostas))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(nova), ensure_ascii=False) + "\n")
+            data = asdict(nova)
+            if nova.checkpoint is None:
+                data.pop("checkpoint")  # legacy records remain byte-compatible
+            handle.write(json.dumps(data, ensure_ascii=False) + "\n")
         self._entries.append(nova)
         self._superseded.update(sobrepostas)
         return nova
@@ -69,17 +74,12 @@ def _entry_from_dict(data: dict) -> IntentEntry:
         id=data["id"],
         ts=data["ts"],
         task_id=data["task_id"],
-        anchor=Anchor(
-            file=raw_anchor["file"],
-            symbol=raw_anchor.get("symbol"),
-            line_start=raw_anchor["line_start"],
-            line_end=raw_anchor["line_end"],
-            blob_sha=raw_anchor["blob_sha"],
-        ),
+        anchor=anchor_from_dict(raw_anchor),
         why=data["why"],
         property=data.get("property") or "",
         domain=data.get("domain") or "",
         supersedes=tuple(data.get("supersedes") or ()),
         author=data.get("author", "agent"),
         trigger_log=tuple(data.get("trigger_log") or ()),
+        checkpoint=Checkpoint.from_dict(data["checkpoint"]) if data.get("checkpoint") is not None else None,
     )

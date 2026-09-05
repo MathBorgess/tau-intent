@@ -50,9 +50,9 @@ class TestEspacoDeChave(unittest.TestCase):
         """The silent break D5 warned about: fix symbol on one side and the
         old comparison would have gone on returning 1.0."""
         region = Region(path="src/mod.py", line_start=1, line_end=3, symbol="f")
-        self.assertEqual(cobertura_de_captura([region], [_entry(symbol=None)]), 0.0)
+        self.assertEqual(cobertura_de_captura([region], [_entry(symbol=None)])["estrita"], 0.0)
         self.assertEqual(
-            cobertura_de_captura([region], [_entry(symbol=None)], por_arquivo=True), 1.0
+            cobertura_de_captura([region], [_entry(symbol=None)])["por_arquivo"], 1.0
         )
 
     def test_cobertura_de_captura_e_uma_razao(self) -> None:
@@ -60,8 +60,8 @@ class TestEspacoDeChave(unittest.TestCase):
             Region(path="a.py", line_start=1, line_end=2, symbol="f"),
             Region(path="b.py", line_start=1, line_end=2, symbol="g"),
         ]
-        self.assertEqual(cobertura_de_captura(regions, [_entry(file="a.py", symbol="f")]), 0.5)
-        self.assertEqual(cobertura_de_captura([], [_entry()]), 0.0)
+        self.assertEqual(cobertura_de_captura(regions, [_entry(file="a.py", symbol="f")])["estrita"], 0.5)
+        self.assertIsNone(cobertura_de_captura([], [_entry()])["estrita"])
 
 
 class TestLatenciaDeCaptura(unittest.TestCase):
@@ -105,8 +105,8 @@ class TestAproveitamentoDoBloco(unittest.TestCase):
         self.assertEqual(tel["reaproveitadas"], 1)
         self.assertEqual(tel["razao"], 0.5)
 
-    def test_sem_nada_servido_e_zero_nao_erro(self) -> None:
-        self.assertEqual(aproveitamento_do_bloco([])["razao"], 0.0)
+    def test_sem_nada_servido_e_nao_avaliavel(self) -> None:
+        self.assertIsNone(aproveitamento_do_bloco([])["razao"])
 
 
 class TestSuperadas(unittest.TestCase):

@@ -142,7 +142,8 @@ def projetar(
         custo = max(count_tokens(render_entry(entry)), 1)
         scored.append((peso, custo, entry))
 
-    disponivel = budget - _custo_do_envelope()
+    grafo_disponivel = bool(graph.nodes) and all(a in graph.nodes for a in ancoras)
+    disponivel = budget - _custo_do_envelope(grafo_disponivel)
     if disponivel <= 0:
         # The envelope alone does not fit. Serving a receipt the agent did not
         # ask for, over budget, would break V4; suppressing it silently would
@@ -154,6 +155,7 @@ def projetar(
         suprimido = False
 
     recibo = Recibo(
+        grafo_disponivel=grafo_disponivel,
         entradas=len(escolhidas),
         saltos_omitidos=len(nao_expandidos),
         superadas_omitidas=int(superadas),
@@ -165,6 +167,7 @@ def projetar(
         else render_block(
             escolhidas,
             cortadas,
+            grafo_disponivel=recibo.grafo_disponivel,
             saltos_omitidos=recibo.saltos_omitidos,
             superadas_omitidas=recibo.superadas_omitidas,
         )
@@ -189,6 +192,7 @@ def projetar(
 
     if cfg.llm_rescue and summarizer_fn is not None and escolhidas:
         contexto = {
+            "orcamento_token": budget,
             "estourou": bool(cortadas),
             "cortadas": len(cortadas),
             "tokens_selecionados": tokens_selecionados,
@@ -216,6 +220,7 @@ def _aplicar_rescue(
     contaminates the contrast without showing up in the report.
     """
     corpo = "\n\n".join(render_entry(entry) for entry in escolhidas)
+    bloco = envelope(corpo, recibo)
     base: dict[str, Any] = {
         "llm_rescue": True,
         "llm_rescue_disparou": False,
@@ -274,14 +279,38 @@ def _aplicar_rescue(
         tel["llm_rescue_recall_de_simbolo"] = recall_de_simbolo(bloco, novo)
     except ImportError:  # pragma: no cover
         pass
+    from tau_intent.rescue import load_rescue_config, preservacoes_checaveis, simbolos_ancorados
+    cfg = getattr(summarizer_fn, "cfg", None) or load_rescue_config()
+    checks = preservacoes_checaveis(cfg, corpo, texto)
+    reasons = [name for name, ok in checks.items() if ok is False]
+    if cfg.proibir_invencao and simbolos_ancorados(texto) - simbolos_ancorados(corpo):
+        reasons.append("âncora inventada")
+    for entry in escolhidas:
+        if getattr(entry, "checkpoint", None) is not None:
+            rendered = render_entry(entry).split("  Checkpoint (evidência determinística):", 1)[1]
+            if rendered not in texto:
+                reasons.append("checkpoint determinístico alterado")
+    budget = (contexto or {}).get("orcamento_token")
+    if budget is not None and count_tokens(novo) > budget:
+        reasons.append("resumo excede orçamento")
+    if reasons:
+        from tau_intent.rescue import recall_de_simbolo
+        tel["llm_rescue_recall_rejeitado"] = tel.get("llm_rescue_recall_de_simbolo")
+        tel["llm_rescue_recall_de_simbolo"] = recall_de_simbolo(bloco, bloco)
+        tel.update({"llm_rescue_aplicado": False, "llm_rescue_falhou": True,
+                    "llm_rescue_erro": "; ".join(reasons),
+                    "llm_rescue_tokens_rejeitados": count_tokens(novo),
+                    "llm_rescue_tokens_depois": count_tokens(bloco),
+                    "llm_rescue_bloco_servido": bloco})
+        return bloco, tel
     return novo, tel
 
 
-def _custo_do_envelope() -> int:
+def _custo_do_envelope(grafo_disponivel: bool = True) -> int:
     """Tokens the tagged envelope, the notice and the receipt cost on their own."""
     # The receipt line has a fixed word count whatever the numbers are, so any
     # non-empty receipt gives the same overhead. An empty one renders nothing.
-    return count_tokens(envelope("", Recibo(entradas=1)))
+    return count_tokens(envelope("", Recibo(entradas=1, grafo_disponivel=grafo_disponivel)))
 
 
 def _guloso_com_fallback_singleton(
@@ -387,7 +416,8 @@ def _recencias(entries: Sequence[Any]) -> dict[int, float]:
     """
     por_arquivo: dict[str, list[tuple[str, int]]] = {}
     for entry in entries:
-        file = str(getattr(getattr(entry, "anchor", None), "file", "") or "")
+        anchor = getattr(entry, "anchor", None)
+        file = anchor.scope_id() if callable(getattr(anchor, "scope_id", None)) else str(getattr(anchor, "file", "") or "")
         por_arquivo.setdefault(file, []).append(
             (str(getattr(entry, "ts", "") or ""), id(entry))
         )
