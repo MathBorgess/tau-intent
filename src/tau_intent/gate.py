@@ -52,6 +52,7 @@ class Falha:
 class Veredito:
     tipo: str
     falhas: tuple[Falha, ...] = ()
+    nao_avaliaveis: tuple[Falha, ...] = ()
 
     @classmethod
     def passa(cls) -> "Veredito":
@@ -99,9 +100,19 @@ def portao(
     """
     known = set(symbols)
     falhas: list[Falha] = []
+    nao_avaliaveis: list[Falha] = []
     totais = _totais_editados(regions, cfg)
 
     for region in regions:
+        resolver = (region.get("resolver", "fornecido") if isinstance(region, dict)
+                    else getattr(region, "resolver", "fornecido"))
+        fina_disponivel = resolver is not None and (bool(_region_symbol(region)) or resolver == "fornecido")
+        if resolver is None:
+            nao_avaliaveis.extend(Falha(code, region, "fonte de identidades indisponível")
+                                  for code in ("SIMBOLO_NAO_RESOLVIDO", "EDICAO_GRANDE_SEM_SIMBOLO"))
+        elif not fina_disponivel:
+            nao_avaliaveis.append(Falha("EDICAO_GRANDE_SEM_SIMBOLO", region,
+                                       "efeito sem identidade fina observável"))
         pending = _lookup(pendentes, region)
         if pending is None:
             falhas.append(Falha("AUSENTE", region))
@@ -115,27 +126,24 @@ def portao(
 
         symbol = _field(pending, "symbol")
         resolvido = _resolve(symbol, region, known)
-        if symbol and not resolvido:
+        if resolver is not None and symbol and not resolvido:
             falhas.append(Falha("SIMBOLO_NAO_RESOLVIDO", region, symbol))
 
         total = totais[_chave_edicao(region)]
-        if total > cfg.limiar_edicao and not resolvido:
+        if fina_disponivel and total > cfg.limiar_edicao and not resolvido:
             falhas.append(
                 Falha(
                     "EDICAO_GRANDE_SEM_SIMBOLO",
                     region,
-                    f"{total} linhas editadas",
+                    f"{total} {getattr(region, 'size_unit', 'unidades')}",
                 )
             )
 
         if not _field(pending, "domain").strip():
             falhas.append(Falha("DOMINIO_AUSENTE", region))
 
-    if not falhas:
-        return Veredito.passa()
-    if bloqueios >= cfg.n_max:
-        return Veredito.escalar(falhas)
-    return Veredito.bloqueia(falhas)
+    tipo = "PASSA" if not falhas else ("ESCALAR" if bloqueios >= cfg.n_max else "BLOQUEIA")
+    return Veredito(tipo, tuple(falhas), tuple(nao_avaliaveis))
 
 
 avaliar = portao
@@ -185,7 +193,9 @@ def _lookup(pendentes: Mapping[object, object], region: object) -> object | None
     return None
 
 
-def _region_key(region: object) -> tuple[str, int, int]:
+def _region_key(region: object) -> tuple:
+    if callable(getattr(region, "key", None)):
+        return region.key()
     path = _region_path(region)
     start, end = _region_span(region)
     return (path, start, end)
@@ -204,6 +214,8 @@ def _region_path(region: object) -> str:
 
 
 def _region_span(region: object) -> tuple[int, int]:
+    if callable(getattr(region, "span", None)):
+        return region.span()
     start = getattr(region, "line_start", None)
     end = getattr(region, "line_end", None)
     if start is None:
@@ -226,6 +238,9 @@ def _region_size(region: object, cfg: GateConfig) -> int:
     ``contexto_diff`` on both sides, which is an estimate and is documented as
     one.
     """
+    units = _int_attr(region, "edited_units")
+    if units is not None:
+        return max(units, 0)
     exact = _int_attr(region, "edited_lines")
     if exact is None:
         exact = _int_attr(region, "linhas_editadas")
@@ -249,6 +264,9 @@ def _int_attr(region: object, name: str) -> int | None:
 
 
 def _ranges_overlap(left: object, right: object) -> bool:
+    overlap = getattr(left, "overlaps", None)
+    if callable(overlap):
+        return overlap(right)
     ls, le = _region_span(left)
     rs, re_ = _region_span(right)
     if (ls, le) == (0, 0) or (rs, re_) == (0, 0):
@@ -278,6 +296,9 @@ def _detail_raw(pending: object) -> str:
 def _resolve(symbol: str, region: object, known: set[str]) -> bool:
     """Does ``symbol`` resolve inside ``region``'s file, per the AST table?"""
     if not symbol:
+        return False
+    witnessed = _region_symbol(region)
+    if witnessed and symbol != witnessed:
         return False
     if symbol in known:
         return True

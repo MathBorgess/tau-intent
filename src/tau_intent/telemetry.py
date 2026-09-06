@@ -47,26 +47,32 @@ def _arquivo(key: str) -> str:
 
 
 def cobertura_de_captura(
-    regions: Iterable[Any],
-    entries: Iterable[Any],
-    *,
-    por_arquivo: bool = False,
-) -> float:
-    """Regions with a current intent / regions touched in the session (G-4).
+    regions: Iterable[Any], entries: Iterable[Any],
+) -> dict[str, Any]:
+    """Fine witness coverage and target coverage are different populations.
 
-    ``por_arquivo`` relaxes the match to the file level, which is what the
-    ratio degrades to whenever the collector could not resolve a symbol. The
-    strict form is the default so that a symbol regression shows up as a drop,
-    not as a silent tie.
+    Fine coverage counts regions whose witness actually resolved an identity.
+    Target coverage counts distinct coarse targets. Neither substitutes for the
+    other; an empty denominator is unknown, never success or failure.
     """
-    alvos = [chave(region) for region in regions]
-    if not alvos:
-        return 0.0
-    cobertos = {chave(entry) for entry in entries}
-    if por_arquivo:
-        cobertos = {_arquivo(key) for key in cobertos}
-        alvos = [_arquivo(key) for key in alvos]
-    return sum(1 for alvo in alvos if alvo in cobertos) / len(alvos)
+    regions, entries = list(regions), list(entries)
+    finas = [r for r in regions if getattr(r, "resolver", "fornecido") is not None
+             and "::" in chave(r)]
+    cobertos = {chave(e) for e in entries}
+    alvos = {_arquivo(chave(r)) for r in regions}
+    cobertos_alvos = {_arquivo(k) for k in cobertos}
+    n = sum(chave(r) in cobertos for r in finas)
+    coarse = len(alvos & cobertos_alvos)
+    return {
+        "estrita": n / len(finas) if finas else None,
+        "por_arquivo": coarse / len(alvos) if alvos else None,
+        "fracao_resolvida": len(finas) / len(regions) if regions else None,
+        "numeradores": {"estrita": n, "por_arquivo": coarse,
+                         "fracao_resolvida": len(finas)},
+        "denominadores": {"estrita": len(finas), "por_arquivo": len(alvos),
+                           "fracao_resolvida": len(regions)},
+        "granularidade": {"simbolo": len(finas), "alvo": len(regions)-len(finas)},
+    }
 
 
 #: Kept for callers written before G-4. Same key space, same maths.
@@ -97,6 +103,7 @@ def latencia_de_captura(pendentes: Mapping[Any, Any] | Iterable[Any]) -> dict[st
     valores = list(por_regiao.values())
     return {
         "por_regiao": por_regiao,
+        "denominador": len(valores),
         "media": sum(valores) / len(valores) if valores else None,
         "maxima": max(valores) if valores else None,
         "regioes_sem_intencao": sem_intencao,
@@ -116,7 +123,7 @@ def aproveitamento_do_bloco(
     """
     chaves = [chave(entry) for entry in servidas]
     if not chaves:
-        return {"servidas": 0, "reaproveitadas": 0, "razao": 0.0, "chaves": []}
+        return {"servidas": 0, "reaproveitadas": 0, "razao": None, "chaves": []}
     depois = {chave(region) for region in regioes_depois}
     depois |= {chave(item) for item in leituras}
     por_arquivo = {_arquivo(key) for key in depois}

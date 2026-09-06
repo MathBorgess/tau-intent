@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from tau_intent.checkpoint import Checkpoint
+from tau_intent.adapters import AnchoredIdentity
 
 
 @dataclass(frozen=True)
@@ -17,7 +19,7 @@ class Anchor:
         return f"{self.file}::{self.symbol}" if self.symbol else self.file
 
     def overlaps(self, other: "Anchor") -> bool:
-        if self.file != other.file:
+        if not isinstance(other, Anchor) or self.file != other.file:
             return False
         return self.line_start <= other.line_end and other.line_start <= self.line_end
 
@@ -27,10 +29,12 @@ class IntentEntry:
     id: str
     ts: str
     task_id: str
-    anchor: Anchor
+    anchor: AnchoredIdentity
     why: str
     property: str
     domain: str
     supersedes: tuple[str, ...] = ()
     author: str = "agent"
     trigger_log: tuple[str, ...] = field(default_factory=tuple)
+    checkpoint: Checkpoint | None = None
+

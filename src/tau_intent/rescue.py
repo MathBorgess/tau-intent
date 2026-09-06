@@ -30,8 +30,8 @@ GATILHOS = ("sempre", "ao_estourar")
 UNIDADES = ("bloco", "arquivo", "entrada")
 POLITICAS_DE_FALHA = ("degradar_sem_sumarizar",)
 
-#: ``arquivo.py::simbolo`` — the anchored symbol the summary may not lose.
-_ANCORA = re.compile(r"[\w./\\-]+\.py::[A-Za-z_][A-Za-z0-9_]*")
+from tau_intent.adapters import REGISTRY
+_ANCORA = re.compile("|".join(f"(?:{r.anchor_format})" for r in REGISTRY.values()))
 
 
 @dataclass(frozen=True)
@@ -139,8 +139,9 @@ def recall_de_simbolo(antes: str, depois: str) -> dict[str, Any]:
     perdidos = sorted(origem - destino)
     return {
         "antes": len(origem),
+        "ancoras_no_bloco": len(origem),
         "depois": len(origem & destino),
-        "razao": (len(origem & destino) / len(origem)) if origem else 1.0,
+        "razao": (len(origem & destino) / len(origem)) if origem else None,
         "perdidos": perdidos,
     }
 
@@ -266,7 +267,8 @@ def preservacoes_checaveis(cfg: RescueConfig, antes: str, depois: str) -> dict[s
     exigidas: Sequence[str] = cfg.preservar_obrigatorio
     resultado: dict[str, Any] = {}
     if "simbolo_ancorado" in exigidas:
-        resultado["simbolo_ancorado"] = recall_de_simbolo(antes, depois)["razao"] == 1.0
+        recall = recall_de_simbolo(antes, depois)
+        resultado["simbolo_ancorado"] = None if recall["antes"] == 0 else not recall["perdidos"]
     if "distincao_property_why" in exigidas:
         tinha = "Propriedade:" in antes and "Por que:" in antes
         resultado["distincao_property_why"] = (

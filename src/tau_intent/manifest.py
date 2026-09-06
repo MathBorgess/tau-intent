@@ -45,6 +45,11 @@ def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -
     part of what was served. So the block that was actually served is recorded,
     not only the hash of the prompt that asked for it (study note §3.7).
     """
+    for name in ("modelo_produtor", "modelo_consumidor"):
+        observed = telemetry.get(name)
+        if name in kwargs and observed is not None and kwargs[name] != observed:
+            raise RelatoIncoerente(f"{name} diverge da execução")
+        kwargs.setdefault(name, observed)
     entry = manifest(flags=flags, **kwargs)
     execucao = {
         "tokens_served": telemetry.get("tokens_served"),
@@ -56,6 +61,11 @@ def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -
         "productive_turns": telemetry.get("productive_turns"),
         "block_turns": telemetry.get("block_turns"),
     }
+    for campo in ("cobertura_efetiva", "fracao_resolvida", "denominadores",
+                  "cobertura_por_adaptador", "cobertura_por_linguagem",
+                  "codigos_nao_avaliaveis", "alvos_excluidos",
+                  "edge_types_efetivos", "grafo_heterogeneo", "adaptadores", "modo", "servidas", "esbarrou_teto", "gate_avaliado", "erros_de_captura", "captura_publicada", "pendencias_nao_publicadas"):
+        execucao[campo] = telemetry.get(campo)
     for campo, valor in telemetry.items():
         if campo.startswith("llm_rescue"):
             execucao[campo] = valor
@@ -69,11 +79,15 @@ def manifest(
     tokenizer: str = "whitespace-v1",
     temperatura_configurada: float | None = None,
     amostragem_conferida_no_fio: bool = False,
+    modelo_produtor: str | None = None,
+    modelo_consumidor: str | None = None,
 ) -> dict[str, Any]:
     """The frozen description of one run's configuration."""
     gate_cfg = load_gate_config()
     bloco_cfg = load_bloco_config()
     entry: dict[str, Any] = {
+        "modelo_produtor": modelo_produtor,
+        "modelo_consumidor": modelo_consumidor,
         "config_sha256": config_hashes(),
         "gate": {
             "versao": gate_cfg.versao,
@@ -133,3 +147,72 @@ def conferir_v4_v5(v4: dict[str, Any], v5: dict[str, Any] | None) -> None:
             nome for nome in set(a) | set(b) if a.get(nome) != b.get(nome)
         )
         raise RelatoIncoerente(f"V4 e V5 sobre YAML diferentes: {diferentes}")
+
+
+def conferir_resolvedores(regions: list, excluidos: list[str]) -> None:
+    missing = {r.path for r in regions if r.resolver is None} - set(excluidos)
+    if missing:
+        raise AssertionError(f"alvos sem resolver não declarados excluídos: {sorted(missing)}")
+
+
+def cobertura_distribuida(regions: list, entries: list, indisponiveis: list,
+                         excluidos: list[str], adapter=None) -> dict[str, Any]:
+    """Declare instrument reach separately from capture success."""
+    from tau_intent.adapters import get_adapter
+    adapter = adapter or get_adapter("code")
+    from tau_intent.telemetry import cobertura_de_captura
+    conferir_resolvedores(regions, excluidos)
+    grupos: dict[str, list] = {}
+    for r in regions:
+        grupos.setdefault(adapter.classification(r), []).append(r)
+    return {
+        "cobertura_por_adaptador": {adapter.name: cobertura_de_captura(regions, entries)},
+        "cobertura_por_linguagem": {k: cobertura_de_captura(rs, entries) for k,rs in grupos.items()} if adapter.name == "code" else {},
+        "codigos_nao_avaliaveis": [
+            {"code": f.code, "alvo": f.region.path, "detail": f.detail} for f in indisponiveis],
+        "alvos_excluidos": sorted(excluidos),
+        "adaptadores": {adapter.name: {"size_unit": adapter.size_unit, "versao": adapter.version,
+                         "source_sha256": _adapter_hashes(adapter),
+                         "resolvedores": sorted({r.resolver for r in regions if r.resolver})}},
+    }
+
+
+def _adapter_hashes(adapter) -> dict[str, str]:
+    import hashlib
+    import sys
+    from pathlib import Path
+    module = sys.modules[type(adapter).__module__]
+    paths = [Path(module.__file__)]
+    if adapter.name == "code":
+        paths.append(paths[0].with_name("code_graph.py"))
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+
+
+def _par(row: dict) -> tuple[str, str]:
+    pair = (row.get("modelo_produtor"), row.get("modelo_consumidor"))
+    if any(not isinstance(v, str) or not v.strip() for v in pair):
+        raise RelatoIncoerente("relatório sem par produtor/consumidor explícito")
+    return pair
+
+
+def conferir_relatorio(grupos: list[dict]) -> None:
+    """Reject a pooled group even if its label pretends it is one model pair."""
+    for group in grupos:
+        pair = _par(group)
+        rows = group.get("execucoes")
+        if not isinstance(rows, list) or not rows:
+            raise RelatoIncoerente("grupo sem execuções auditáveis")
+        if any(_par(row) != pair for row in rows):
+            raise RelatoIncoerente("pares produtor/consumidor distintos foram agrupados")
+
+
+def relatorio_por_par(execucoes: list[dict]) -> list[dict]:
+    groups = {}
+    for row in execucoes:
+        producer, consumer = _par(row)
+        group = groups.setdefault((producer, consumer), {
+            "modelo_produtor": producer, "modelo_consumidor": consumer, "execucoes": []})
+        group["execucoes"].append(row)
+    report = list(groups.values())
+    conferir_relatorio(report)
+    return report

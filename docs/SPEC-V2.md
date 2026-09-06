@@ -144,3 +144,21 @@ Append one line per finding, dated. Never delete a line; supersede it.
 | 2026-09-05 | reading Handoff Debt §2.3 | the three continuation states are domain-neutral and cheap to stamp | adopted |
 | 2026-09-05 | reading STATE-Bench Agent Learning Track | `retrieve_learnings(query, top_k) -> list[str]` is the `serve` interface, already specified by a third party | adopted as the `state` adapter's serve surface |
 | 2026-09-05 | checking τ²-bench and STATE-Bench | neither provides dependency **between** tasks; only SWE-Milestone does | **declared limit, not solved** |
+| 2026-09-05 | rebuilding the code adapter | Pure moves can be audited separately from mechanism changes with source hashes and a normal-case golden | implemented; see DELTA-V1.1-V2.md |
+| 2026-09-05 | exercising correction after rejection | Current valid declarations must repair earlier malformed calls while historical errors remain measurable | implemented under owner's continuation authorization |
+| 2026-09-05 | testing commands and coarse effects | Tool path heuristics and absent fine identities must not create unsatisfiable agent obligations | implemented; no new gate code or calibrated threshold |
+| 2026-09-05 | following failed-gate publication | Invalid or interrupted capture must not enter the served current store | implemented when gate is enabled |
+| 2026-09-05 | checking the productive budget | A counter without termination is not a cap; cap termination must not claim gate approval | implemented, TETO plus explicit telemetry |
+| 2026-09-05 | exercising rescue on selected evidence | Post-selection rewriting must preserve anchors/checkpoints and respect the same budget | implemented, deterministic guards and recorded fallback |
+| 2026-09-05 | starting a task before its first effect | Initial orientation must resolve statement anchors without requiring an existing delta | implemented |
+| 2026-09-05 | inspecting command/evidence provenance | Bind validation output to the exact observed revision, not just a command label | proposed, not implemented; GATE-PROPOSAL.md |
+| 2026-09-05 | evaluating COMPROMISSO_VACUO | Before-true invariants may be preservation obligations rather than vacuous commitments | universal block rejected in recommendation; not implemented |
+| 2026-09-05 | reviewing mandatory fine-name repetition | An already witnessed identity may not need a redundant declaration above a size threshold | proposed diagnostic replacement, not implemented |
+| 2026-09-05 | keeping capture schema compatible | Native target/identity wire names could replace legacy file/files/symbol aliases | deferred; would need an explicit schema decision |
+| 2026-09-05 | inspecting the retained code diff observer | Cover untracked/binary effects and distinguish git failure from an empty effect set | not implemented; code observer boundary retained and declared in DELTA |
+| 2026-09-05 | validating the state fixture | Concurrent external writers need ownership/attribution and snapshot consistency | not implemented; fixture uses an isolated single-writer typed store |
+| 2026-09-05 | providing literal retrieval | A deterministic domain-specific query mapper can broaden recall without a model judge | supported injection point; semantic retrieval not implemented |
+| 2026-09-05 | reviewing witness-table precision | A pure gate cannot detect an unused invented identity inside a supposedly trusted table | declared instrumentation limit; no language-resolver work |
+| 2026-09-05 | recording model handoffs | Provider-attested IDs and per-entry producer provenance would strengthen caller-supplied pair stamps | not implemented; freeze and archive run manifests alongside logs |
+| 2026-09-05 | testing sibling state keys | Effect overlap must be adapter-defined; a shared namespace is not a shared fine identity | implemented; missing sibling intent remains AUSENTE |
+| 2026-09-05 | reviewing typed-store hashes | Accepted values must not lose distinctions during canonical encoding | implemented; reject non-JSON nested types and non-string object keys before mutation |
