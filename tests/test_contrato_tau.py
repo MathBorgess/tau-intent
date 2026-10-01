@@ -155,12 +155,12 @@ class TestContratoTau(unittest.TestCase):
 
     def test_pin_constants_are_populated(self):
         self.assertEqual(pin_mod.PINNED_DIST, "tau-ai")
-        self.assertEqual(pin_mod.PINNED_VERSION, "0.4.1")
+        self.assertEqual(pin_mod.PINNED_VERSION, "0.4.7")
         self.assertEqual(len(pin_mod.PINNED_SHA256), 64)
         self.assertTrue(all(c in "0123456789abcdef" for c in pin_mod.PINNED_SHA256))
         self.assertEqual(
             pin_mod.PINNED_SHA256,
-            "c0f396527c9c804f6787bc1eccb585f7f123293154861fe8b99354cba79dbc71",
+            "4899ca3cc1c965e27c175fefad8754a68b441d9af49838f6624cc0e1adb59ce9",
         )
         rc = pin_mod.main(["--check"])
         self.assertEqual(rc, 0)

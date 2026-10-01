@@ -107,7 +107,7 @@ Conversational agents under dual control in **non-code** domains — `airline`, 
 
 **Tasks are independent single conversations — no dependency between them.** Useful as a clean environment for the **model-handoff** question specifically (produce under M1, serve to M2, within one task), not as a dependent-sequence substrate.
 
-> ⚠️ **Name collision, and this project punishes that kind of error.** This package imports `tau_agent` from `tau-ai==0.4.1`, the Hugging Face harness. τ²-bench is Sierra's and is a different thing. **They are not the same `tau`.** Never imply a relationship.
+> ⚠️ **Name collision, and this project punishes that kind of error.** This package imports `tau_agent` from `tau-ai==0.4.7`, the Hugging Face harness. τ²-bench is Sierra's and is a different thing. **They are not the same `tau`.** Never imply a relationship.
 
 ### The `Handoff Debt` protocol — a method, not a substrate
 

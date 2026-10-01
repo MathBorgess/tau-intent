@@ -8,16 +8,16 @@ This repository is the mechanism (`capture` / `gate` / `project` / `serve`). The
 
 | | |
 |---|---|
-| Python | 3.11+ |
+| Python | 3.12+ (tau-ai requires it) |
 | Network | only to install; tests of v1 run offline against a fake provider |
 | Secrets | none for the test suite |
-| Tau | imported as a **pinned library**. Zero lines of tau are edited here |
+| Tau | imported as a **pinned library** (`tau-ai==0.4.7`, extra `.[tau]`). Zero lines of tau are edited here |
 
 ## One command the committee can run
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-python3 -m tau_intent.pin --check   # V8 germ: pin intact, no local edit of tau
+python3 -m tau_intent.pin --check --require-installed   # V8 germ: pin intact, no local edit of tau (SKIP fails)
 ```
 
 Exit code 0 on the suite means the mechanism **behaves as specified**, not that it changes a downstream outcome. That second question is the experiment, after G2.

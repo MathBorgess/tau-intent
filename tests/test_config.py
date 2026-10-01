@@ -178,7 +178,17 @@ class TestManifesto(unittest.TestCase):
         self.assertEqual(entry["gate"]["versao"], load_gate_config().versao)
         self.assertEqual(entry["gate"]["limiar_edicao"], load_gate_config().limiar_edicao)
         self.assertEqual(entry["bloco"]["envelope_tag"], load_bloco_config().envelope_tag)
-        self.assertEqual(entry["tau"]["version"], "0.4.1")
+        self.assertEqual(entry["tau"]["version"], "0.4.7")
+
+    def test_config_sha256_continua_o_mesmo_do_baseline_v2(self) -> None:
+        """Refactors and the bench slices must not touch the frozen config members."""
+        import json
+        from pathlib import Path
+
+        golden = json.loads(
+            (Path(__file__).parent / "fixtures" / "config_sha256_v2.json").read_text()
+        )
+        self.assertEqual(config_hashes(), golden)
 
     def test_config_hashes_muda_se_o_arquivo_mudar(self) -> None:
         antes = config_hashes()

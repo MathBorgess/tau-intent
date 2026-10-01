@@ -7,13 +7,16 @@ name = "tau-intent"
 version = "0.1.0"
 description = "Intent-history mechanism around Hugging Face tau. Not a fork."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Matheus Borges" }]
 dependencies = []
 
 [project.optional-dependencies]
-tau = ["tau-ai==0.4.1"]
+tau = ["tau-ai==0.4.7"]
+# Bench V0 (`tau-intent bench`): real tau + the arena WebSocket client + the
+# pytest the hidden-test oracle runs. Core `dependencies` stays empty.
+bench = ["tau-ai==0.4.7", "websockets>=12", "pytest>=8"]
 
 [project.scripts]
 tau-intent = "tau_intent.cli:main"
@@ -25,4 +28,4 @@ where = ["src"]
 "" = "src"
 
 [tool.setuptools.package-data]
-tau_intent = ["projection.yaml", "defaults/project_v1.yaml"]
+tau_intent = ["*.yaml", "defaults/*.yaml", "prompts/*.txt"]

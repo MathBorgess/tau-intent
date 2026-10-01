@@ -1,0 +1,7 @@
+{
+ "gate.yaml": "96b224e4825831aa3aba6d035c7e213e0f512ce6c587b5d81fb7e9951814ea5f",
+ "bloco.yaml": "86d48ea0e7157c3a5a5f24ae43e2c246fd8e44edcd6dce3b0ba88b5c7cacb0c4",
+ "projection.yaml": "048f6d03a9146f0e0270fb0aff4034f7e565b0fca3da4f577380f9580c4219da",
+ "rescue.yaml": "580139481eba3ff9cc8626c8443c8e53b9b545644381e33dfffe524a9f5acab2",
+ "prompts/rescue-v1.txt": "22330bbeedbf105625b9d56b1d69b837e89da711ecfd54aef95e5377534c4152"
+}

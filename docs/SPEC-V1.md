@@ -10,6 +10,8 @@ Prove the mechanism works as specified (bench V1-V4, V6, V7, V8 germ) without bu
 
 Pinned library, no fork. Verified at huggingface/tau commit 0a67734 (tau-ai 0.4.1, MIT) by two independent readers. Confirm the PyPI name before locking.
 
+> **Superseded on 2026-10-01:** pin `tau-ai==0.4.1` → `tau-ai==0.4.7` (owner decision, Python >=3.12; wheel sha256 in `src/tau_intent/pin.py`, checked by `python -m tau_intent.pin --check --require-installed`). The facts below were re-verified against the 0.4.7 sources for the bench runner; see `docs/BENCH-V0-CONTRACT.md`.
+
 Facts tests/test_contrato_tau.py must lock (fake provider, no network on the happy path):
 
 1. TurnEndEvent exists and is what a turn boundary is.
