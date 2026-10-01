@@ -311,6 +311,7 @@ async def run_task(
                     uso_do_provedor(getattr(event, "message", None)),
                     len(getattr(getattr(event, "message", None), "tool_calls", None)
                         or _tool_results(event)),
+                    getattr(getattr(event, "message", None), "timing", None),
                 ))
             if failure is not None:
                 # tau ends the loop with a TurnEnd whose message has stop_reason

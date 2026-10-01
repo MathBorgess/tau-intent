@@ -50,6 +50,8 @@ Emit = Callable[[dict[str, Any]], None]
 
 ASSIGN_KEYS = ("cell_id", "mode", "arms", "seed", "k_max", "deadline_s", "max_productive_turns")
 MAX_QUALIFICATION_ATTEMPTS = 2
+#: After this many consecutive units lost to the backend, the cell stops asking it.
+MAX_CONSECUTIVE_BACKEND_FAILURES = 2
 
 
 class CellError(Exception):
@@ -75,6 +77,8 @@ class CellSettings:
     rescue_timeout_s: float | None = None
     keep_workspaces: bool = False
     skip_preflight: bool = False
+    #: The participant backend this process serves (V0.2); stored as ``backend.backend_id``.
+    backend_id: str | None = None
     #: ``upload(bundle_path, cell_id, sha256) -> detail``; raises on failure.
     upload: Callable[[Path, str, str], str] | None = None
 
@@ -158,9 +162,14 @@ class CellRunner:
         self.s = settings
         self.emit = emit
         self.stop = stop or threading.Event()
-        self.log = log
+        self._log = log
+        self.log = lambda message: log(self._s(message))
         self._workspaces: dict[str, ArmWorkspace] = {}
         self._tmp_roots: list[Path] = []
+
+    def _s(self, text: str) -> str:
+        """The backend's raw host never leaves this process (V0.2): scrub every text we write."""
+        return environment.redact_host(text, self.s.provider_url)
 
     # ------------------------------------------------------------------ entry
     def run(self, assign: dict[str, Any]) -> CellOutcome:
@@ -192,12 +201,14 @@ class CellRunner:
             preflight = environment.preflight_endpoint(
                 self.s.provider_url, self.s.model, assign["seed"], api_key=self.s.api_key,
                 timeout_s=max(60.0, float(assign["deadline_s"])))
+            preflight["error"] = None if preflight["error"] is None else self._s(preflight["error"])
             if not preflight["reachable"]:
-                raise CellError("provider_unreachable",
-                                f"{self.s.provider_url} did not answer: {preflight['error']}")
+                raise CellError("provider_unreachable", self._s(
+                    f"{self.s.provider_url} did not answer: {preflight['error']}"))
             if not preflight["usage_in_stream"]:
                 self.log("warning: the endpoint returned no usage in the stream; tokens will be "
                          "recorded as missing (never estimated)")
+        self._describe_backend()
         units = plan(assign, taskset)
         self.records: list[dict[str, Any]] = []
         self.unit_rows: list[dict[str, Any]] = []
@@ -205,6 +216,8 @@ class CellRunner:
         truncated = False
         qualification_passed: bool | None = None
         stopped = False
+        backend_failures = 0  # consecutive units lost to the backend
+        last_label = ""
 
         for position, unit in enumerate(units):
             if unit.arm_id == "Q" and qualification_passed:
@@ -215,6 +228,19 @@ class CellRunner:
                     if left.arm_id == "Q" and qualification_passed:
                         continue
                     self._append(self._stopped_record(left, "stopped"), left)
+                truncated = True
+                break
+            if backend_failures and (backend_failures >= MAX_CONSECUTIVE_BACKEND_FAILURES
+                                     or not environment.backend_reachable(self.s.provider_url)):
+                # Infrastructure, not data: the backend is gone. Nothing is retried; what is
+                # left is recorded as error (never as a failed attempt) and the cell closes.
+                detail = f"not run: the backend stayed unreachable after {last_label}"
+                self._error("backend_unreachable", f"{detail}; remaining units recorded as error")
+                for left in units[position:]:
+                    if left.arm_id == "Q" and qualification_passed:
+                        continue
+                    self._append(self._stopped_record(
+                        left, "error", {"kind": "backend_unreachable", "detail": detail}), left)
                 truncated = True
                 break
             try:
@@ -228,9 +254,13 @@ class CellRunner:
                 self._error("oracle_unavailable", fatal)
                 row = None
             if row is None:
-                self._append(self._stopped_record(unit, "error"), unit)
+                self._append(self._stopped_record(unit, "error", {"kind": "instrument_error",
+                                                                  "detail": self._s(fatal or "")[:300]}), unit)
                 truncated = True
                 continue
+            last_label = unit.label
+            lost = (row.get("error") or {}).get("kind") == "backend_unreachable"
+            backend_failures = backend_failures + 1 if lost else 0
             if unit.arm_id == "Q":
                 qualification_passed = bool(row["oracle"]["pass"])
 
@@ -247,7 +277,11 @@ class CellRunner:
     def _workspace(self, unit: Unit) -> ArmWorkspace:
         key = unit.arm_id if unit.arm_id != "Q" else f"Q{unit.attempt}"
         if key not in self._workspaces:
-            root = Path(tempfile.mkdtemp(prefix=f"tau-intent-{key}-"))
+            # Unique and under this process's own --out: concurrent runners on one machine
+            # share no temp path (V0.2). Outside the cell dir, so it never enters the bundle.
+            base = self.s.out_dir / ".workspaces"
+            base.mkdir(parents=True, exist_ok=True)
+            root = Path(tempfile.mkdtemp(prefix=f"{self.cell_id}-{key}-", dir=base))
             self._tmp_roots.append(root)
             ws = ArmWorkspace(root)
             seed = unit.task.seed if isinstance(unit.task, Qualification) else self.taskset.seed
@@ -276,8 +310,26 @@ class CellRunner:
         self.emit(message)
 
     def _error(self, code: str, message: str) -> None:
+        message = self._s(message)
         self.log(f"error [{code}]: {message}")
         self.emit({"type": "bench_error", "cell_id": self.cell_id, "code": code, "message": message})
+
+    def _describe_backend(self) -> None:
+        """Once per cell: what the provider says about itself (Ollama only), plus ``backend``.
+
+        Ollama attests its version, the model's details and digest; the digest passed on
+        the command line wins. Nothing here carries the raw host.
+        """
+        model = dict(self.s.join.get("model") or {})
+        self.ollama: dict[str, Any] | None = None
+        if self.s.runner_kind == "ollama":
+            self.ollama = environment.ollama_metadata(self.s.provider_url, self.s.model)
+            model["details"] = self.ollama["details"]
+            if not model.get("digest") and self.ollama["digest"]:
+                model["digest"] = self.ollama["digest"]
+        self.model_block = model
+        self.backend = environment.backend_block(
+            self.s.provider_url, self.s.backend_id, (self.ollama or {}).get("ollama_version"))
 
     def _run_unit(self, unit: Unit) -> dict[str, Any]:
         assign = self.assign
@@ -303,8 +355,8 @@ class CellRunner:
             if kind == "message_update":
                 return  # token-by-token duplicates of message_end
             seq["n"] += 1
-            transcript.write(json.dumps({"seq": seq["n"], "t": rec.now_iso(), "event": _event_json(event)},
-                                        ensure_ascii=False, default=str) + "\n")
+            transcript.write(self._s(json.dumps({"seq": seq["n"], "t": rec.now_iso(), "event": _event_json(event)},
+                                                ensure_ascii=False, default=str)) + "\n")
             transcript.flush()
             if kind == "turn_end":
                 state["turn"] += 1
@@ -320,7 +372,7 @@ class CellRunner:
         async def session() -> Any:
             spec = ProviderSpec(self.s.provider_url, self.s.model, assign["seed"],
                                 timeout_s=float(assign["deadline_s"]), api_key=self.s.api_key)
-            harness = build_harness(ws.path, flags, spec, home=ws.home)
+            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0)
             try:
                 summarizer = None
                 if flags.llm_rescue:
@@ -335,8 +387,10 @@ class CellRunner:
                     deadline_s=float(assign["deadline_s"]), on_event=on_event)
                 return result, summarizer
             finally:
+                net_errors.extend(harness.wire.network_errors)
                 await harness.aclose()
 
+        net_errors: list[dict[str, str]] = []
         result = summarizer = None
         failure: Exception | None = None
         try:
@@ -369,11 +423,11 @@ class CellRunner:
             "flags": rec.flags_dict(flags),
             "run": result.manifest if result else None,
             "bench": {"deadline_s": assign["deadline_s"], "max_productive_turns": assign["max_productive_turns"],
-                      "seed": assign["seed"], "model": self.s.model, "provider_url": self.s.provider_url,
+                      "seed": assign["seed"], "model": self.s.model, "provider_url": self._s(self.s.provider_url),
                       "system_prompt_sha256": system_prompt_sha256(),
                       "rescue_model": self.s.model if flags.llm_rescue else None,
                       "attempt": unit.attempt},
-            "error": None if failure is None else f"{type(failure).__name__}: {failure}",
+            "error": None if failure is None else self._s(f"{type(failure).__name__}: {failure}"),
         }
         (unit_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False, default=str),
                                                 encoding="utf-8")
@@ -386,6 +440,7 @@ class CellRunner:
         else:
             tokens, turns = tel["tokens"], tel["turnos"]
             verdict, productive, blocks = result.verdict, result.productive_turns, result.block_turns
+        error = self._unit_error(terminated, failure, result, net_errors)
         rel = unit_dir.relative_to(self.cell_dir).as_posix()
         record = self._record(
             unit, started_at, rec.now_iso(), terminated, tokens, turns,
@@ -394,7 +449,7 @@ class CellRunner:
              "paths": {"transcript": f"{rel}/transcript.jsonl", "diff": f"{rel}/diff.patch",
                        "manifest": f"{rel}/manifest.json", "oracle": f"{rel}/oracle.json",
                        "prompt": f"{rel}/prompt.txt"}},
-            manifest_run=result.manifest if result else None)
+            manifest_run=result.manifest if result else None, error=error)
         self._append(record, unit)
         self._progress(unit, "done", state["turn"] or None,
                        (state["in"], state["out"]) if state["known"] and state["turn"] else None)
@@ -402,11 +457,31 @@ class CellRunner:
                  f"({oracle['passed']} passed, {oracle['failed']} failed, {oracle['errors']} errors)")
         return record
 
+    def _unit_error(self, terminated: str, failure: Exception | None, result: Any,
+                    net_errors: list[dict[str, str]]) -> dict[str, str] | None:
+        """``error`` of a unit that ended in ``error``: what broke, as infrastructure or not.
+
+        A transport failure on the agent's own calls (refused, reset, timeout, closed
+        mid-stream) is ``backend_unreachable``: the treatment never completed, and it was
+        not retried. Anything else the provider said is ``provider_error``; an exception of
+        this instrument is ``instrument_error``.
+        """
+        if terminated != "error":
+            return None
+        if net_errors:
+            last = net_errors[-1]
+            return {"kind": "backend_unreachable", "detail": self._s(f"{last['type']}: {last['detail']}")[:300]}
+        if failure is not None:
+            return {"kind": "instrument_error", "detail": self._s(f"{type(failure).__name__}: {failure}")[:300]}
+        said = (result.telemetry.get("erro_de_provedor") if result else None) or "unknown"
+        return {"kind": "provider_error", "detail": self._s(str(said))[:300]}
+
     # ----------------------------------------------------------------- record
     def _record(self, unit: Unit, started_at: str, ended_at: str, terminated: str, tokens: dict[str, Any],
                 turns: list[dict[str, Any]], telemetry: dict[str, Any], oracle: dict[str, Any],
                 evolution: dict[str, Any], artifacts: dict[str, Any], *,
-                manifest_run: dict[str, Any] | None = None, flags: Any = None) -> dict[str, Any]:
+                manifest_run: dict[str, Any] | None = None, flags: Any = None,
+                error: dict[str, str] | None = None) -> dict[str, Any]:
         flags = flags or flags_from_args(["--arm", rec.FLAG_ARM_BY_ARM_ID[unit.arm_id]])
         hashes = (manifest_run or {}).get("config_sha256") or config_hashes()
         return {
@@ -416,7 +491,7 @@ class CellRunner:
             "arm_id": unit.arm_id, "harness_id": rec.HARNESS_BY_ARM[unit.arm_id],
             "task_set_sha": self.taskset.sha, "task_index": unit.index, "task_id": unit.task.id,
             "task_hash": unit.task.hash,
-            "model": self.s.join["model"], "hardware": self.s.join["hardware"],
+            "model": self.model_block, "hardware": self.s.join["hardware"], "backend": self.backend,
             "arm_order": list(self.assign["arms"]), "seed": self.assign["seed"],
             "mechanism": {
                 "tau_intent_sha": self.s.join["tau_intent_sha"],
@@ -426,11 +501,11 @@ class CellRunner:
                 "runner_version": self.s.join["runner_version"],
                 "flags": rec.flags_dict(flags)},
             "oracle": rec.oracle_block(oracle), "evolution": evolution, "tokens": tokens, "turns": turns,
-            "mechanism_telemetry": telemetry, "terminated_by": terminated,
+            "mechanism_telemetry": telemetry, "terminated_by": terminated, "error": error,
             "started_at": started_at, "ended_at": ended_at, "artifacts": artifacts,
         }
 
-    def _stopped_record(self, unit: Unit, why: str) -> dict[str, Any]:
+    def _stopped_record(self, unit: Unit, why: str, error: dict[str, str] | None = None) -> dict[str, Any]:
         """A unit the runner never ran: complete in shape, zero in content, never guessed."""
         key = unit.arm_id if unit.arm_id != "Q" else f"Q{unit.attempt}"
         ws = self._workspaces.get(key)
@@ -441,8 +516,10 @@ class CellRunner:
         tokens = {"in": 0, "out": 0, "rescue_in": 0, "rescue_out": 0, "source": "provider_usage", "cost_usd": 0}
         telemetry = {"verdict": None, "productive_turns": 0, "block_turns": 0, "bloco_vazio": None,
                      "tokens_served": 0, "nao_avaliaveis": [], "servidas": [], "not_run": True}
+        if why == "error" and error is None:
+            error = {"kind": "not_run", "detail": "the unit was not run"}
         return self._record(unit, now, now, why, tokens, [], telemetry, rec.zero_oracle(), evolution,
-                            {"bundle": f"{self.cell_id}.tar.gz", "paths": {}})
+                            {"bundle": f"{self.cell_id}.tar.gz", "paths": {}}, error=error)
 
     def _append(self, record: dict[str, Any], unit: Unit) -> None:
         problems = rec.validate_record(record)
@@ -483,7 +560,10 @@ class CellRunner:
                          "qualification_hash": self.taskset.qualification.hash if self.taskset.qualification else None,
                          "k_available": len(self.taskset.tasks),
                          "k_run": min(assign["k_max"], len(self.taskset.tasks))},
-            "provider_url": self.s.provider_url, "model": self.s.model, "preflight": preflight,
+            "provider_url": self._s(self.s.provider_url), "model": self.s.model,
+            "model_block": self.model_block, "backend": self.backend,
+            "ollama": self.ollama,
+            "preflight": preflight,
             "pin": {"dist": pin.PINNED_DIST, "version": pin.PINNED_VERSION, "sha256": pin.PINNED_SHA256},
             "started_at": started_at, "ended_at": ended_at, "units": self.unit_rows,
             "records": len(self.records), "truncated": truncated, "fatal": fatal,
@@ -515,6 +595,10 @@ class CellRunner:
     def _cleanup(self) -> None:
         if self.s.keep_workspaces:
             return
+        import shutil
         for root in self._tmp_roots:
-            import shutil
             shutil.rmtree(root, ignore_errors=True)
+        try:
+            (self.s.out_dir / ".workspaces").rmdir()  # only if empty
+        except OSError:
+            pass

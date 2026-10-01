@@ -184,7 +184,8 @@ class TestAgainstAFakeArena(unittest.TestCase):
                                      "task_set_sha", "model", "hardware"})
         self.assertEqual(join["participant_id"], register["participant_id"])
         self.assertEqual(join["model"]["runner_kind"], "other")  # the stub's port is not a known runner's
-        self.assertEqual(set(join["hardware"]), {"os", "chip", "ram_gb", "accel"})
+        self.assertEqual(set(join["hardware"]), {"source", "os", "chip", "ram_gb", "accel"})
+        self.assertEqual(join["hardware"]["source"], "local")
         self.assertEqual(len(join["task_set_sha"]), 64)
 
         records = [m["record"] for m in arena.of("bench_record")]

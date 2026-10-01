@@ -92,7 +92,9 @@ class TestRescueProvider(unittest.TestCase):
         self.assertTrue(result.telemetry["llm_rescue_falhou"])
         tokens = result.telemetry["tokens"]
         self.assertEqual((tokens["rescue_in"], tokens["rescue_out"]), (500, 40))
-        self.assertEqual(summarizer.chamadas_log, [{"tokens_in": 500, "tokens_out": 40}])
+        (call,) = summarizer.chamadas_log
+        self.assertEqual({k: v for k, v in call.items() if k != "latency_ms"}, {"tokens_in": 500, "tokens_out": 40})
+        self.assertIsInstance(call["latency_ms"], int)  # V0.2 throughput telemetry, descriptive
 
     def test_the_trigger_is_always_even_when_nothing_was_cut(self):
         stub, summarizer, wire, result = self.run_c(lambda body: text(rescue_text(body)))

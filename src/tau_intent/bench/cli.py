@@ -5,6 +5,15 @@
       --provider-url http://localhost:11434/v1 --model <model-id> \\
       --taskset <path> --out <dir>
   tau-intent bench --offline --arms A,B,C --seed 7 ...        # no server: E0 rehearsal
+
+V0.2 (the event): the runner runs on the arena owner's machine, one process per
+participant backend, and calls the participant's Ollama over the LAN:
+
+  tau-intent bench --server ws://127.0.0.1:3000/ws --pin <PIN> \\
+      --participant-id <backend_id> --nickname <name> --backend-id <backend_id> \\
+      --provider-url http://<lan-ip>:11434/v1 --model <model-id> --runner-kind ollama \\
+      --hardware-source declared [--chip ... --ram-gb ... --accel ...] \\
+      --taskset <path> --out <dir-of-this-backend>
 """
 
 from __future__ import annotations
@@ -46,8 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="default: guessed from the port (11434 ollama, 1234 lmstudio, 8080 llamacpp)")
     model.add_argument("--api-key", default="local")
     model.add_argument("--digest", help="model digest, if your runner does not attest one (sha256:...)")
-    model.add_argument("--chip"), model.add_argument("--ram-gb", type=float)
+    model.add_argument("--chip", help="hardware chip; with --hardware-source declared, as declared")
+    model.add_argument("--ram-gb", type=float)
     model.add_argument("--accel", choices=environment.ACCELS)
+    model.add_argument("--hardware-source", choices=environment.HARDWARE_SOURCES, default="local",
+                       help="local (default): read this machine. declared: never read this machine; "
+                            "--chip/--ram-gb/--accel are the participant's own declaration (null allowed)")
+    model.add_argument("--backend-id", help="id of the participant backend served by this process "
+                                            "(stored as backend.backend_id)")
     work = parser.add_argument_group("work")
     work.add_argument("--taskset", required=True, type=Path, help="path to the tg-taskset-1 directory")
     work.add_argument("--out", required=True, type=Path, help="where the cell's data is kept")
@@ -103,17 +118,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         "model": {"id": args.model,
                   "digest": args.digest or environment.model_digest(args.provider_url, args.model, kind),
                   "runner_kind": kind},
-        "hardware": environment.hardware(chip=args.chip, ram_gb=args.ram_gb, accel=args.accel),
+        "hardware": (environment.hardware_declared(chip=args.chip, ram_gb=args.ram_gb, accel=args.accel)
+                     if args.hardware_source == "declared"
+                     else environment.hardware(chip=args.chip, ram_gb=args.ram_gb, accel=args.accel)),
     }
     settings = CellSettings(
         out_dir=args.out, taskset=taskset, provider_url=args.provider_url, model=args.model,
         runner_kind=kind, participant_id=join["participant_id"], join=join,
         pin_hash=hashlib.sha256(args.pin.encode()).hexdigest() if args.pin else None,
         api_key=args.api_key, oracle_timeout_s=args.oracle_timeout_s, rescue_timeout_s=args.rescue_timeout_s,
-        keep_workspaces=args.keep_workspaces, skip_preflight=args.skip_preflight)
+        keep_workspaces=args.keep_workspaces, skip_preflight=args.skip_preflight,
+        backend_id=args.backend_id)
     args.out.mkdir(parents=True, exist_ok=True)
     log(f"task set {taskset.id} {taskset.version} sha {taskset.sha[:12]} ({len(taskset.tasks)} tasks); "
-        f"model {args.model} via {kind} at {args.provider_url}")
+        f"model {args.model} via {kind} at {environment.redact_host(args.provider_url, args.provider_url)}")
 
     if args.offline:
         arms = [a.strip() for a in args.arms.split(",") if a.strip()]

@@ -176,14 +176,22 @@ def uso_do_provedor(message: Any) -> dict[str, int] | None:
     return {"tokens_in": entrada, "tokens_out": saida}
 
 
-def linha_de_turno(index: int, kind: str, uso: dict[str, int] | None, tool_calls: int) -> dict[str, Any]:
-    return {
+def linha_de_turno(index: int, kind: str, uso: dict[str, int] | None, tool_calls: int,
+                   timing: Any = None) -> dict[str, Any]:
+    """One row per provider call. ``timing`` (tau's ``ResponseTiming``, measured on the
+    provider stream) adds ``latency_ms`` and ``ttft_ms``: throughput telemetry, descriptive,
+    never an outcome. Without it the row is the V1 row, unchanged."""
+    row = {
         "turn_index": index,
         "kind": kind,
         "tokens_in": None if uso is None else uso["tokens_in"],
         "tokens_out": None if uso is None else uso["tokens_out"],
         "tool_calls": tool_calls,
     }
+    if timing is not None:
+        row["latency_ms"] = getattr(timing, "total_duration_ms", None)
+        row["ttft_ms"] = getattr(timing, "time_to_first_output_ms", None)
+    return row
 
 
 def resumir_tokens(

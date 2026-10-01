@@ -27,6 +27,11 @@ TERMINATIONS = ("completed", "teto_turnos", "deadline", "stopped", "error")
 RUNNER_KINDS = ("ollama", "lmstudio", "llamacpp", "other")
 ACCELS = ("cuda", "metal", "cpu", "other")
 FLAG_KEYS = ("capture", "gate", "project", "serve", "llm_rescue")
+HARDWARE_SOURCES = ("local", "declared")
+TRANSPORTS = ("lan", "local")
+#: ``error.kind`` of a unit that ended in ``error`` (V0.2). ``backend_unreachable`` is
+#: infrastructure: the analysis drops those units, it never counts them as failures.
+ERROR_KINDS = ("backend_unreachable", "provider_error", "instrument_error", "not_run")
 
 
 def now_iso() -> str:
@@ -110,10 +115,25 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     hw = record.get("hardware") or {}
     need(hw.get("accel") in ACCELS, "hardware.accel")
     need(isinstance(hw.get("ram_gb"), (int, float)) and hw["ram_gb"] >= 0, "hardware.ram_gb")
+    need("source" not in hw or hw["source"] in HARDWARE_SOURCES, "hardware.source")
+    if hw.get("source") == "declared":
+        declared = hw.get("declared")
+        need(isinstance(declared, dict) and set(declared) == {"chip", "ram_gb", "accel"}, "hardware.declared")
+    backend = record.get("backend")
+    if backend is not None:
+        need(isinstance(backend, dict) and backend.get("transport") in TRANSPORTS, "backend.transport")
+        sha = (backend or {}).get("provider_host_sha256") if isinstance(backend, dict) else None
+        need(isinstance(sha, str) and len(sha) == 64, "backend.provider_host_sha256")
     need(isinstance(record.get("seed"), int) and not isinstance(record.get("seed"), bool), "seed must be an int")
     order = record.get("arm_order")
     need(isinstance(order, list) and all(a in ("A", "B", "C") for a in order), "arm_order")
     need(record.get("terminated_by") in TERMINATIONS, "terminated_by")
+    error = record.get("error")
+    if record.get("terminated_by") == "error":
+        need(isinstance(error, dict) and error.get("kind") in ERROR_KINDS
+             and isinstance(error.get("detail"), str), "terminated_by error requires error {kind, detail}")
+    else:
+        need(error is None, "error must be null unless terminated_by is error")
 
     mech = record.get("mechanism") or {}
     flags = mech.get("flags")
@@ -121,6 +141,10 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     tel = record.get("mechanism_telemetry") or {}
     turns = record.get("turns")
     need(isinstance(turns, list), "turns")
+    for row in turns if isinstance(turns, list) else []:
+        for key in ("latency_ms", "ttft_ms"):
+            need(row.get(key) is None or (isinstance(row[key], int) and not isinstance(row[key], bool)
+                                          and row[key] >= 0), f"turns[].{key} must be a non-negative int or null")
     if harness == "tau" and isinstance(flags, dict):
         need(not any(flags.values()), "arm A/Q: flags must all be false")
         need(tel.get("block_turns", 0) == 0, "arm A/Q: block_turns must be 0")

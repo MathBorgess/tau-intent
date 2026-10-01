@@ -60,6 +60,10 @@ class WireLog:
 
     stamp: dict[str, Any]
     bodies: list[dict[str, Any]] = field(default_factory=list)
+    #: Transport failures seen on the agent's calls (refused, reset, timeout, closed
+    #: mid-stream): ``{"type": <httpx class>, "detail": <message>}``. They are how the
+    #: cell tells "the backend is gone" (infrastructure) from any other provider error.
+    network_errors: list[dict[str, str]] = field(default_factory=list)
 
     def report(self) -> dict[str, Any]:
         n = len(self.bodies)
@@ -79,8 +83,33 @@ class WireLog:
         }
 
 
+#: A backend that does not accept a connection is known quickly; a model that is
+#: slow to answer is not an unreachable one, so only the connect phase is short.
+CONNECT_TIMEOUT_S = 10.0
+
+
 def stamping_transport(inner: Any, stamp: dict[str, Any], wire: WireLog) -> Any:
     import httpx
+
+    def note(exc: Exception) -> None:
+        wire.network_errors.append({"type": type(exc).__name__, "detail": str(exc)[:200]})
+
+    class GuardedStream(httpx.AsyncByteStream):
+        """The body of the response: a failure while it streams is seen here."""
+
+        def __init__(self, stream: Any) -> None:
+            self._stream = stream
+
+        async def __aiter__(self) -> Any:
+            try:
+                async for chunk in self._stream:
+                    yield chunk
+            except httpx.TransportError as exc:
+                note(exc)
+                raise
+
+        async def aclose(self) -> None:
+            await self._stream.aclose()
 
     class StampingTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -100,7 +129,14 @@ def stamping_transport(inner: Any, stamp: dict[str, Any], wire: WireLog) -> Any:
                         extensions=request.extensions,
                     )
                     wire.bodies.append(payload)
-            return await inner.handle_async_request(request)
+            try:
+                response = await inner.handle_async_request(request)
+            except httpx.TransportError as exc:
+                note(exc)
+                raise
+            return httpx.Response(
+                response.status_code, headers=response.headers, stream=GuardedStream(response.stream),
+                extensions=response.extensions)
 
         async def aclose(self) -> None:
             await inner.aclose()
@@ -131,7 +167,7 @@ def build_harness(
     wire = WireLog(stamp=spec.stamp())
     client = httpx.AsyncClient(
         transport=stamping_transport(httpx.AsyncHTTPTransport(), spec.stamp(), wire),
-        timeout=httpx.Timeout(spec.timeout_s),
+        timeout=httpx.Timeout(spec.timeout_s, connect=min(spec.timeout_s, CONNECT_TIMEOUT_S)),
     )
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(

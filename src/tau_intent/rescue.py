@@ -18,6 +18,7 @@ prompt outside the freeze.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -216,15 +217,18 @@ class Sumarizador:
         self.chamadas_log: list[dict[str, Any]] = []
 
     def _chamar(self, body: dict[str, Any]) -> Any:
+        started = time.monotonic()
         try:
             resposta = self.provider_fn(body)
         except Exception as exc:
             self.chamadas_log.append({"tokens_in": None, "tokens_out": None,
-                                      "erro": f"{type(exc).__name__}: {exc}"[:200]})
+                                      "erro": f"{type(exc).__name__}: {exc}"[:200],
+                                      "latency_ms": int((time.monotonic() - started) * 1000)})
             raise
         uso = uso_de_resposta(resposta)
         self.chamadas_log.append({"tokens_in": None if uso is None else uso["tokens_in"],
-                                  "tokens_out": None if uso is None else uso["tokens_out"]})
+                                  "tokens_out": None if uso is None else uso["tokens_out"],
+                                  "latency_ms": int((time.monotonic() - started) * 1000)})
         return resposta
 
     def __call__(self, corpo: str, contexto: dict[str, Any] | None = None) -> Resumo | None:

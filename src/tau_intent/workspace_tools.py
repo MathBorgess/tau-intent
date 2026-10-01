@@ -276,4 +276,9 @@ def _command_env(home: Path | None) -> dict[str, str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     if home is not None:
         env["HOME"] = str(home)
+        # Several runners share one machine (V0.2): a private TMPDIR keeps their agents
+        # from colliding on a fixed /tmp path.
+        scratch = Path(home) / "tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        env["TMPDIR"] = str(scratch)
     return env

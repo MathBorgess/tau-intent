@@ -44,12 +44,21 @@ class StubServer:
 
     def __init__(self, script: Script | list[Turn], *, usage: bool = True,
                  split_args: bool = False, status: Callable[[int], int] | None = None,
-                 models: list[dict[str, Any]] | None = None) -> None:
+                 models: list[dict[str, Any]] | None = None, host: str = "127.0.0.1",
+                 ollama_version: str | None = None, show: dict[str, Any] | None = None,
+                 die_after: int | None = None) -> None:
         self.script = script if callable(script) else (lambda i, _b, _s=list(script): _s[min(i, len(_s) - 1)])
         self.usage = usage
         self.split_args = split_args
         self.status = status
         self.models = models
+        #: Ollama's own API (``/api/version``, ``POST /api/show``) when asked for.
+        self.ollama_version = ollama_version
+        self.show = show
+        #: After this many chat requests the server dies: the request in flight is reset and
+        #: the listening socket is closed (later connections are refused).
+        self.die_after = die_after
+        self.dead = False
         self.requests: list[dict[str, Any]] = []
         self.paths: list[str] = []
         self._lock = threading.Lock()
@@ -61,8 +70,18 @@ class StubServer:
             def log_message(self, *args: Any) -> None:  # silence
                 pass
 
+            def _json(self, payload: Any) -> None:
+                body = json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_GET(self) -> None:  # noqa: N802
                 stub.paths.append(self.path)
+                if self.path.endswith("/api/version") and stub.ollama_version is not None:
+                    return self._json({"version": stub.ollama_version})
                 if self.path.endswith("/api/tags") and stub.models is not None:
                     body = json.dumps({"models": stub.models}).encode()
                     self.send_response(200)
@@ -77,10 +96,20 @@ class StubServer:
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
                 body = json.loads(raw or b"{}")
+                if self.path.endswith("/api/show"):
+                    stub.paths.append(self.path)
+                    if stub.show is None:
+                        return self.send_error(404)
+                    return self._json(stub.show)
                 with stub._lock:
                     index = len(stub.requests)
                     stub.requests.append(body)
                     stub.paths.append(self.path)
+                if stub.die_after is not None and index >= stub.die_after:
+                    stub.kill()
+                    self.close_connection = True
+                    self.connection.close()  # reset: no response at all
+                    return
                 code = stub.status(index) if stub.status else 200
                 if code != 200:
                     payload = json.dumps({"error": {"message": f"stub status {code}"}}).encode()
@@ -115,7 +144,7 @@ class StubServer:
             def handle_error(self, request: Any, client_address: Any) -> None:
                 pass  # the client hanging up (deadline tests) is not a test failure
 
-        self.httpd = QuietServer(("127.0.0.1", 0), Handler)
+        self.httpd = QuietServer((host, 0), Handler)
         self.thread = threading.Thread(target=lambda: self.httpd.serve_forever(poll_interval=0.02), daemon=True)
 
     # ------------------------------------------------------------------ shapes
@@ -188,6 +217,14 @@ class StubServer:
         host, port = self.httpd.server_address[:2]
         return f"http://{host}:{port}"
 
+    def kill(self) -> None:
+        """The backend goes away: the listening socket closes, new connections are refused."""
+        if self.dead:
+            return
+        self.dead = True
+        self.httpd.shutdown()  # called from a request thread: the serve loop is another one
+        self.httpd.server_close()
+
     def chat_requests(self) -> list[dict[str, Any]]:
         return list(self.requests)
 
@@ -196,6 +233,5 @@ class StubServer:
         return self
 
     def __exit__(self, *exc: Any) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
+        self.kill()
         self.thread.join(timeout=5)

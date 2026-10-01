@@ -117,6 +117,9 @@ def run_oracle(taskset: TaskSet, k: int, workspace: Path, *, python: str | None 
         env["PYTHONPATH"] = str(workspace)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONHASHSEED"] = "0"
+        # Concurrent runners: pytest's tmp_path base and any scratch file stay in this run's own dir.
+        (tmp / "scratch").mkdir()
+        env["TMPDIR"] = str(tmp / "scratch")
         started = time.monotonic()
         timed_out = False
         try:
