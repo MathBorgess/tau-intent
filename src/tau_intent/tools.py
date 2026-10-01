@@ -208,7 +208,7 @@ def _record_intent_execute():
     return execute
 
 
-def tool_specs(*, capture: bool, workspace: Any = None) -> list[dict[str, Any]]:
+def tool_specs(*, capture: bool, workspace: Any = None, home: Any = None) -> list[dict[str, Any]]:
     """Return the v1 catalog. B/C (capture=True) include record_intent; A does not.
 
     With ``workspace`` the read/write/edit/bash executors are the real ones
@@ -243,7 +243,7 @@ def tool_specs(*, capture: bool, workspace: Any = None) -> list[dict[str, Any]]:
     if workspace is not None:
         from tau_intent.workspace_tools import make_executors
 
-        real = make_executors(workspace)
+        real = make_executors(workspace, home=home)
         for spec in specs:
             spec["execute_fn"] = real[spec["name"]]
     if capture:
@@ -307,9 +307,9 @@ def _as_agent_result(execute_fn: Callable[..., Any]) -> Callable[..., Any]:
     return execute
 
 
-def catalog(*, capture: bool, workspace: Any = None) -> list[Any]:
+def catalog(*, capture: bool, workspace: Any = None, home: Any = None) -> list[Any]:
     """AgentTool list when tau_agent is importable, else plain spec dicts."""
-    specs = tool_specs(capture=capture, workspace=workspace)
+    specs = tool_specs(capture=capture, workspace=workspace, home=home)
     try:
         from tau_agent.tools import AgentTool
     except ImportError:

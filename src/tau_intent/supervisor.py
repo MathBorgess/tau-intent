@@ -47,6 +47,10 @@ from tau_intent.telemetry import (
 )
 from tau_intent.tools import catalog
 
+class ArmIsolationError(RuntimeError):
+    """capture=off wrote the intent log. The arm is not what it claims to be."""
+
+
 PASSA = "PASSA"
 BLOQUEIA = "BLOQUEIA"
 ESCALAR = "ESCALAR"
@@ -374,7 +378,7 @@ async def run_task(
     elif not flags.capture:
         after = _line_count(intents_path)
         if after > before_lines:
-            raise RuntimeError("capture=off wrote intents.jsonl")
+            raise ArmIsolationError("capture=off wrote intents.jsonl")
 
     depois = list(store.current()) if store is not None else []
     tel["cobertura_de_captura"] = cobertura_de_captura(regions, depois)

@@ -12,8 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: install pinned tau (tau-ai==0.4.7)
-        run: python -m pip install -e ".[tau]"
+      - name: install pinned tau and the bench extra (tau-ai==0.4.7, websockets, pytest)
+        run: python -m pip install -e ".[bench]"
       - name: test (offline)
         run: PYTHONPATH=src python3 -m unittest discover -s tests -v
         env:

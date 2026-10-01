@@ -115,6 +115,7 @@ def build_harness(
     *,
     system: str | None = None,
     max_retries: int = 2,
+    home: Path | None = None,
 ) -> Any:
     """A real ``tau_agent.AgentHarness`` for one session (one task, no compaction).
 
@@ -150,7 +151,7 @@ def build_harness(
             provider=provider,
             model=spec.model,
             system=system if system is not None else system_prompt(),
-            tools=catalog(capture=flags.capture, workspace=Path(workspace)),
+            tools=catalog(capture=flags.capture, workspace=Path(workspace), home=home),
             max_turns=None,
         )
     )

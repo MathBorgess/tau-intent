@@ -1,0 +1,14 @@
+{
+  "schema": "tg-taskset-1",
+  "id": "demo-calc",
+  "version": "0.0.1",
+  "language": "python",
+  "python": ">=3.10",
+  "seed": "seed",
+  "test_runner": ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+  "tasks": [
+    {"index": 1, "id": "sub", "statement": "tasks/01/statement.md", "tests": "tasks/01/tests", "depends_on": []},
+    {"index": 2, "id": "mul-module", "statement": "tasks/02/statement.md", "tests": "tasks/02/tests", "depends_on": [1]}
+  ],
+  "qualification": {"seed": "qualification/seed", "statement": "qualification/statement.md", "tests": "qualification/tests"}
+}

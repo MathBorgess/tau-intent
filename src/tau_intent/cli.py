@@ -89,6 +89,13 @@ def flags_from_args(args: argparse.Namespace | list[str] | None = None) -> Flags
 
 
 def main(argv: list[str] | None = None) -> int:
+    args_in = sys.argv[1:] if argv is None else list(argv)
+    if args_in and args_in[0] == "bench":
+        # `tau-intent bench ...`: the arena runner. Imported lazily: it needs the
+        # `bench` extra and nothing else in this module does.
+        from tau_intent.bench.cli import main as bench_main
+
+        return bench_main(args_in[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     flags = flags_from_args(args)
