@@ -110,7 +110,9 @@ PYTHONPATH=src NO_NETWORK=1 python3 -m unittest discover -s tests -v
   separate distribution. Fine coverage still cannot measure the witness's own recall.
 - Code retains v1.1's tracked-text diff boundary. Untracked/binary effects and command
   failures need a stronger code effect contract before claiming exhaustive filesystem
-  coverage. No benchmark connector, dependency DAG runner, provider verification or
+  coverage.
+
+  > **Superseded on 2026-10-01:** untracked files, binary files and git failures are now covered by the code observer (`observe()` in `adapters/code.py`): untracked text is an added hunk, binary/symlink/oversized content is a declared opaque effect (coarse target, no identity), and a failed `git` call raises instead of returning an empty set (`tests/test_code_observer.py`). Effects of commands that touch nothing under the workspace remain outside the witness. No benchmark connector, dependency DAG runner, provider verification or
   external oracle was exercised. Typed-store changes reverted before the second read
   are net-zero effects, not an operation history.
 

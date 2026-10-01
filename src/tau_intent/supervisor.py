@@ -364,6 +364,10 @@ async def run_task(
         tel["codigos_nao_avaliaveis"] = [
             {"code": code, "alvo": "*", "detail": "efeito independente indisponível"} for code in CODIGOS]
     from tau_intent.collect import diagnosticos_de_captura
+    observation = getattr(adapter, "last_observation", None)
+    if diff is None and observation is not None:
+        tel["efeitos_nao_rastreados"] = list(observation.untracked)
+        tel["efeitos_opacos"] = dict(observation.opaque)
     tel["erros_de_captura"] = diagnosticos_de_captura(collected_events)
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
