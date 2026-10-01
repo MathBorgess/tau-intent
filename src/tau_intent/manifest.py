@@ -64,7 +64,9 @@ def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -
     for campo in ("cobertura_efetiva", "fracao_resolvida", "denominadores",
                   "cobertura_por_adaptador", "cobertura_por_linguagem",
                   "codigos_nao_avaliaveis", "alvos_excluidos",
-                  "edge_types_efetivos", "grafo_heterogeneo", "adaptadores", "modo", "servidas", "esbarrou_teto", "gate_avaliado", "erros_de_captura", "captura_publicada", "pendencias_nao_publicadas"):
+                  "edge_types_efetivos", "grafo_heterogeneo", "adaptadores", "modo", "servidas", "esbarrou_teto", "gate_avaliado", "erros_de_captura", "captura_publicada", "pendencias_nao_publicadas",
+                  "encerramento", "erro_de_provedor", "chamada_interrompida", "tokens", "turnos",
+                  "amostragem", "bloco_vazio", "efeitos_nao_rastreados", "efeitos_opacos"):
         execucao[campo] = telemetry.get(campo)
     for campo, valor in telemetry.items():
         if campo.startswith("llm_rescue"):

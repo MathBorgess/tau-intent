@@ -41,6 +41,9 @@ from tau_intent.telemetry import (
     cobertura_de_captura,
     count_tokens,
     latencia_de_captura,
+    linha_de_turno,
+    resumir_tokens,
+    uso_do_provedor,
 )
 from tau_intent.tools import catalog
 
@@ -217,6 +220,7 @@ async def run_task(
 
     bloco = ""
     servidas: list[Any] = []
+    rescue_ini = len(getattr(summarizer_fn, "chamadas_log", ()))  # this run's calls start here
     if flags.serve and not flags.project:
         # Under H16 no measured arm serves the whole store: render_tudo left
         # the arms (D1). The flag combination still parses, and it serves
@@ -254,6 +258,11 @@ async def run_task(
     follow_ups: list[str] = []
 
     tel["encerramento"] = "completed"
+    turnos: list[dict[str, Any]] = []
+    # Rescue calls come first in time: the block is built before the session.
+    chamadas_rescue = [dict(c, kind="rescue")
+                       for c in list(getattr(summarizer_fn, "chamadas_log", ()))[rescue_ini:]]
+    last_was_turn_end = True
     started = time.monotonic()
     events = harness.prompt(prompt_text).__aiter__()
     try:
@@ -261,6 +270,7 @@ async def run_task(
             remaining = None if deadline_s is None else deadline_s - (time.monotonic() - started)
             if remaining is not None and remaining <= 0:
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
+                tel["chamada_interrompida"] = not last_was_turn_end
                 break
             try:
                 # A hung local model must not outlive the cell's clock: the wait for
@@ -271,7 +281,9 @@ async def run_task(
                 break
             except asyncio.TimeoutError:
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
+                tel["chamada_interrompida"] = True
                 break
+            last_was_turn_end = _is_turn_end(event)
             if on_event is not None:
                 on_event(event)
             # Only the events the collector understands feed it. tau also emits
@@ -284,6 +296,16 @@ async def run_task(
             if not _is_turn_end(event):
                 continue
             failure = _provider_failure(event)
+            if failure is None:
+                # One row per provider call that answered. Turns that follow a
+                # gate rejection are the blocking budget's, the rest productive.
+                turnos.append(linha_de_turno(
+                    len(chamadas_rescue) + len(turnos) + 1,
+                    "block" if follow_ups else "productive",
+                    uso_do_provedor(getattr(event, "message", None)),
+                    len(getattr(getattr(event, "message", None), "tool_calls", None)
+                        or _tool_results(event)),
+                ))
             if failure is not None:
                 # tau ends the loop with a TurnEnd whose message has stop_reason
                 # error/aborted and no tool results. That is a dead provider, not a
@@ -376,6 +398,16 @@ async def run_task(
     tel["max_turns_on_tau"] = None
     amostragem = _amostragem_no_fio(harness)
     tel["amostragem"] = amostragem
+    # Outcome tokens (Q3) come from provider usage per call, never from the
+    # whitespace counter that sizes the block. Rescue calls are read at the end:
+    # a rejected rewrite is in the log too, and it cost the model all the same.
+    chamadas_rescue = [dict(c, kind="rescue")
+                       for c in list(getattr(summarizer_fn, "chamadas_log", ()))[rescue_ini:]]
+    for ordem, chamada in enumerate(chamadas_rescue, start=1):
+        chamada["turn_index"] = ordem
+    tel["turnos"] = chamadas_rescue + turnos
+    tel["tokens"] = resumir_tokens(
+        turnos, chamadas_rescue, chamada_interrompida=bool(tel.get("chamada_interrompida")))
     from tau_intent.manifest import manifest_da_execucao
     return RunResult(
         flags=flags,
