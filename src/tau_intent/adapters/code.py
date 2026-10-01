@@ -192,17 +192,26 @@ def _opaque_region(path: str) -> Region:
     return Region(path, 0, 0, size=1, edited_lines=0, resolver=None)
 
 
-def observe(workspace: Path, base: str = "HEAD") -> Observation:
+#: Files the mechanism itself writes into the workspace. They are not the
+#: agent's effects: the supervisor appends to the intent log, and counting that
+#: write as an effect would make every captured intent demand another intent.
+MECHANISM_FILES = ("intents.jsonl",)
+
+
+def observe(workspace: Path, base: str = "HEAD",
+            ignore: Iterable[str] = MECHANISM_FILES) -> Observation:
     """Tracked changes against ``base`` **plus** files git does not track yet.
 
     ``base`` defaults to HEAD; the bench passes the commit its task started
     from, so an agent that runs ``git commit`` itself cannot hide its work.
-    Raises ``EffectObservationError`` when git fails.
+    Raises ``EffectObservationError`` when git fails. ``ignore`` names workspace
+    paths the mechanism writes itself (the intent log); they are never effects.
     """
     workspace = Path(workspace)
+    skip = set(ignore)
     diff = _git(workspace, "diff", "--no-color", "--no-ext-diff", "--no-renames",
                 "--src-prefix=a/", "--dst-prefix=b/", base).decode("utf-8", "replace")
-    obs = Observation(regions=regions_from_diff(diff))
+    obs = Observation(regions=[r for r in regions_from_diff(diff) if r.path not in skip])
     # numstat reports "-\t-\tpath" for content git treats as binary: the diff
     # above has no hunk for it, so without this the effect would vanish.
     numstat = _git(workspace, "diff", "--numstat", "-z", "--no-renames", base)
@@ -210,11 +219,15 @@ def observe(workspace: Path, base: str = "HEAD") -> Observation:
         parts = entry.split(b"\t", 2)
         if len(parts) == 3 and parts[0] == b"-" and parts[1] == b"-":
             path = parts[2].decode("utf-8", "replace")
+            if path in skip:
+                continue
             obs.opaque[path] = "binary"
             obs.regions.append(_opaque_region(path))
     listed = _git(workspace, "ls-files", "--others", "--exclude-standard", "-z")
     for raw in sorted(item for item in listed.split(b"\0") if item):
         path = raw.decode("utf-8", "replace")
+        if path in skip:
+            continue
         obs.untracked.append(path)
         region = _untracked_region(workspace, path, obs.opaque)
         obs.regions.append(region)
@@ -272,16 +285,17 @@ class CodeAdapter:
     size_unit = "edited_lines"
     edge_types = ("contains", "imports", "invokes", "inherits")
 
-    def __init__(self, base: str = "HEAD"):
+    def __init__(self, base: str = "HEAD", ignore: Iterable[str] = MECHANISM_FILES):
         #: Revision the effects are measured against (the task's starting commit).
         self.base = base
+        self.ignore = tuple(ignore)
         #: The last tree observation, for telemetry (untracked / opaque effects).
         self.last_observation: Observation | None = None
 
     def effects(self, workspace, supplied=None):
         if supplied is not None:
             return resolver_simbolos(regions_from_diff(supplied), workspace)
-        self.last_observation = observe(Path(workspace), self.base)
+        self.last_observation = observe(Path(workspace), self.base, self.ignore)
         return resolver_simbolos(list(self.last_observation.regions), workspace)
 
     def collect(self, events, effects, workspace):

@@ -54,12 +54,14 @@ def run_arm(root: Path, arm: str, stub: StubServer, **kwargs):
 
     flags = flags_from_args(["--arm", arm])
     summarizer = kwargs.pop("summarizer_fn", None)
+    kwargs.setdefault("prompt", "make f return 1")
+    retries = kwargs.pop("max_retries", 0)
 
     async def main():
         harness = build_harness(root, flags, ProviderSpec(stub.url, "stub-model", SEED, timeout_s=5),
-                                max_retries=kwargs.pop("max_retries", 0))
+                                max_retries=retries)
         try:
-            result = await run_task(root, flags, prompt="make f return 1", harness=harness,
+            result = await run_task(root, flags, harness=harness,
                                     summarizer_fn=summarizer, **kwargs)
         finally:
             await harness.aclose()

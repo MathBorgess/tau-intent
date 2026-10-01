@@ -150,6 +150,12 @@ class TestUntrackedEffects(unittest.TestCase):
         self.create("intents.jsonl", "{}\n")
         self.assertEqual(observe(self.root).regions, [])
 
+    def test_the_mechanisms_own_intent_log_is_not_an_effect_of_the_agent(self):
+        self.create("intents.jsonl", "{}\n")
+        self.assertEqual(observe(self.root).regions, [])
+        self.assertEqual(CodeAdapter().effects(self.root), [])
+        self.assertEqual([r.path for r in observe(self.root, ignore=()).regions], ["intents.jsonl"])
+
     def test_clean_tree_is_a_truly_empty_effect_set(self):
         obs = observe(self.root)
         self.assertEqual((obs.regions, obs.untracked, obs.opaque), ([], [], {}))

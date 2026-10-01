@@ -165,6 +165,9 @@ async def run_task(
     deadline_s: float | None = None,
     on_event: Callable[[Any], None] | None = None,
 ) -> RunResult:
+    # The deadline is the whole attempt's clock: the rescue call that builds the
+    # block (arm C) is part of what C costs, so it runs on this clock too.
+    clock_start = time.monotonic()
     adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
     if store is None:
@@ -263,11 +266,10 @@ async def run_task(
     chamadas_rescue = [dict(c, kind="rescue")
                        for c in list(getattr(summarizer_fn, "chamadas_log", ()))[rescue_ini:]]
     last_was_turn_end = True
-    started = time.monotonic()
     events = harness.prompt(prompt_text).__aiter__()
     try:
         while True:
-            remaining = None if deadline_s is None else deadline_s - (time.monotonic() - started)
+            remaining = None if deadline_s is None else deadline_s - (time.monotonic() - clock_start)
             if remaining is not None and remaining <= 0:
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
                 tel["chamada_interrompida"] = not last_was_turn_end
