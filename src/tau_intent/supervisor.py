@@ -13,6 +13,8 @@ arm's path (D1). It stayed an inspection tool in ``render.py``.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -157,10 +159,16 @@ async def run_task(
     checkpoint_source: Callable[[list], Any] | None = None,
     modelo_produtor: str | None = None,
     modelo_consumidor: str | None = None,
+    deadline_s: float | None = None,
+    on_event: Callable[[Any], None] | None = None,
 ) -> RunResult:
     adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
-    intents_path = workspace / "intents.jsonl"
+    if store is None:
+        store = IntentStore(workspace)
+    # The store knows where the log lives: the bench keeps it outside the
+    # agent's workspace, so the capture=off guard must watch *that* file.
+    intents_path = Path(getattr(store, "path", None) or workspace / "intents.jsonl")
     before_lines = _line_count(intents_path)
     gate_cfg = gate_cfg or load_gate_config()
     bloco_cfg = bloco_cfg or load_bloco_config()
@@ -176,11 +184,14 @@ async def run_task(
             "declarado, e cair para o braço B em silêncio contamina o contraste"
         )
 
+    if deadline_s is not None and deadline_s <= 0:
+        raise ValueError("deadline_s must be positive or None")
     tools = catalog(capture=flags.capture)
     if harness is None:
         harness = FakeHarness(max_turns=None, tools=tools)
     _assert_tau_max_turns_none(harness)
-    modelo_consumidor = modelo_consumidor or getattr(harness, "model_id", None)
+    modelo_consumidor = modelo_consumidor or getattr(harness, "model_id", None) \
+        or getattr(getattr(harness, "config", None), "model", None)
     if modelo_consumidor is None and isinstance(harness, FakeHarness):
         modelo_consumidor = "fake-provider-v1"
     modelo_produtor = modelo_produtor or modelo_consumidor
@@ -201,8 +212,6 @@ async def run_task(
     tel: dict[str, Any] = {"tokenizer": "whitespace-v1",
                            "edge_types_efetivos": [], "grafo_heterogeneo": False}
     current_entries: list[Any] = []
-    if store is None:
-        store = IntentStore(workspace)
     if store is not None:
         current_entries = list(store.current())
 
@@ -244,48 +253,83 @@ async def run_task(
     tel["esbarrou_teto"] = False
     follow_ups: list[str] = []
 
-    async for event in harness.prompt(prompt_text):
-        collected_events.append(event)
-        if _is_tool_start(event):
-            continue
-        if not _is_turn_end(event):
-            continue
-        if _tool_results(event):
-            productive += 1
-            if max_productive_turns is not None and productive >= max_productive_turns:
-                tel["esbarrou_teto"] = True
-                verdict = "TETO"
+    tel["encerramento"] = "completed"
+    started = time.monotonic()
+    events = harness.prompt(prompt_text).__aiter__()
+    try:
+        while True:
+            remaining = None if deadline_s is None else deadline_s - (time.monotonic() - started)
+            if remaining is not None and remaining <= 0:
+                tel["encerramento"], verdict = "deadline", "DEADLINE"
                 break
-            continue
-        if diff is None:
-            regions = adapter.effects(workspace)
-            if alvos_excluidos is None:
-                excluidos = sorted({r.path for r in regions if r.resolver is None})
-            conferir_resolvedores(regions, excluidos)
-        if not getattr(adapter, "observable", True):
-            verdict = "NAO_AVALIAVEL"
+            try:
+                # A hung local model must not outlive the cell's clock: the wait for
+                # the next event is what the deadline bounds, not only the tools.
+                event = await (anext(events) if remaining is None
+                               else asyncio.wait_for(anext(events), remaining))
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                tel["encerramento"], verdict = "deadline", "DEADLINE"
+                break
+            if on_event is not None:
+                on_event(event)
+            # Only the events the collector understands feed it. tau also emits
+            # tool_execution_update/_end events that carry ``tool_name`` and no
+            # ``args``: handed to the collector they read as malformed capture calls.
+            if _is_tool_start(event) or _is_turn_end(event) or isinstance(event, dict):
+                collected_events.append(event)
+            if _is_tool_start(event):
+                continue
+            if not _is_turn_end(event):
+                continue
+            failure = _provider_failure(event)
+            if failure is not None:
+                # tau ends the loop with a TurnEnd whose message has stop_reason
+                # error/aborted and no tool results. That is a dead provider, not a
+                # finished task: running the gate on it would approve an empty diff.
+                tel["erro_de_provedor"] = failure
+                tel["encerramento"], verdict = "error", "ERRO"
+                break
+            if _tool_results(event):
+                productive += 1
+                if max_productive_turns is not None and productive >= max_productive_turns:
+                    tel["esbarrou_teto"] = True
+                    tel["encerramento"] = "teto_turnos"
+                    verdict = "TETO"
+                    break
+                continue
+            if diff is None:
+                regions = adapter.effects(workspace)
+                if alvos_excluidos is None:
+                    excluidos = sorted({r.path for r in regions if r.resolver is None})
+                conferir_resolvedores(regions, excluidos)
+            if not getattr(adapter, "observable", True):
+                verdict = "NAO_AVALIAVEL"
+                break
+            if not flags.gate:
+                verdict = "PASSA"
+                break
+            pendentes = adapter.collect(collected_events, regions, workspace)
+            v = gate_fn(
+                regions,
+                pendentes,
+                symbols if symbols is not None else adapter.identities(regions, workspace),
+                gate_cfg,
+                blocks,
+            )
+            tel["gate_avaliado"] = True
+            indisponiveis = list(v.nao_avaliaveis)
+            verdict = v.tipo
+            if v.tipo == "BLOQUEIA":
+                blocks += 1
+                msg = render_falhas(v.falhas)
+                follow_ups.append(msg)
+                harness.follow_up(msg)
+                continue
             break
-        if not flags.gate:
-            verdict = "PASSA"
-            break
-        pendentes = adapter.collect(collected_events, regions, workspace)
-        v = gate_fn(
-            regions,
-            pendentes,
-            symbols if symbols is not None else adapter.identities(regions, workspace),
-            gate_cfg,
-            blocks,
-        )
-        tel["gate_avaliado"] = True
-        indisponiveis = list(v.nao_avaliaveis)
-        verdict = v.tipo
-        if v.tipo == "BLOQUEIA":
-            blocks += 1
-            msg = render_falhas(v.falhas)
-            follow_ups.append(msg)
-            harness.follow_up(msg)
-            continue
-        break
+    finally:
+        await _close_events(events)
 
     if diff is None:
         regions = adapter.effects(workspace)
@@ -326,6 +370,8 @@ async def run_task(
     tel["productive_turns"] = productive
     tel["block_turns"] = blocks
     tel["max_turns_on_tau"] = None
+    amostragem = _amostragem_no_fio(harness)
+    tel["amostragem"] = amostragem
     from tau_intent.manifest import manifest_da_execucao
     return RunResult(
         flags=flags,
@@ -336,7 +382,11 @@ async def run_task(
         intents_path=intents_path,
         telemetry=tel,
         bloco=bloco,
-        manifest=manifest_da_execucao(flags, tel),
+        manifest=manifest_da_execucao(
+            flags, tel,
+            temperatura_configurada=amostragem.get("temperature"),
+            amostragem_conferida_no_fio=bool(amostragem.get("conferida_no_fio")),
+        ),
     )
 
 
@@ -436,6 +486,31 @@ def _line_count(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def _amostragem_no_fio(harness: Any) -> dict[str, Any]:
+    """What the request bodies carried, read from the wire log of the provider.
+
+    A harness without a wire log (the fake one) has nothing to verify, and
+    says so: ``conferida_no_fio`` stays False instead of claiming a check.
+    """
+    wire = getattr(harness, "wire", None)
+    return wire.report() if wire is not None else {"conferida_no_fio": False}
+
+
+def _provider_failure(event: Any) -> str | None:
+    """Reason when a TurnEnd closes a failed provider call, else None."""
+    message = getattr(event, "message", None)
+    if getattr(message, "stop_reason", None) in {"error", "aborted"}:
+        return str(getattr(message, "error_message", None) or message.stop_reason)
+    return None
+
+
+async def _close_events(events: Any) -> None:
+    """Close the harness stream so a harness that stopped early can run again."""
+    closer = getattr(events, "aclose", None)
+    if closer is not None:
+        await closer()
 
 
 def _is_turn_end(event: Any) -> bool:
