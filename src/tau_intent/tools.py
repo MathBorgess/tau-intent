@@ -208,8 +208,12 @@ def _record_intent_execute():
     return execute
 
 
-def tool_specs(*, capture: bool) -> list[dict[str, Any]]:
-    """Return the v1 catalog. B/C (capture=True) include record_intent; A does not."""
+def tool_specs(*, capture: bool, workspace: Any = None, home: Any = None) -> list[dict[str, Any]]:
+    """Return the v1 catalog. B/C (capture=True) include record_intent; A does not.
+
+    With ``workspace`` the read/write/edit/bash executors are the real ones
+    (``workspace_tools``); without it they are the stubs the fake harness uses.
+    """
     specs = [
         {
             "name": "read",
@@ -236,6 +240,12 @@ def tool_specs(*, capture: bool) -> list[dict[str, Any]]:
             "execute_fn": _stub_execute("bash"),
         },
     ]
+    if workspace is not None:
+        from tau_intent.workspace_tools import make_executors
+
+        real = make_executors(workspace, home=home)
+        for spec in specs:
+            spec["execute_fn"] = real[spec["name"]]
     if capture:
         specs.append(
             {
@@ -276,9 +286,30 @@ CATALOG = {
 }
 
 
-def catalog(*, capture: bool) -> list[Any]:
+def _as_agent_result(execute_fn: Callable[..., Any]) -> Callable[..., Any]:
+    """tau's loop needs an ``AgentToolResult``; the stubs and ``record_intent``
+    return plain dicts. Adapt at the boundary instead of rewriting them."""
+    import json
+
+    from tau_agent.messages import TextContent
+    from tau_agent.tools import AgentToolResult
+
+    async def execute(tool_call_id, arguments, signal=None, on_update=None):
+        value = await execute_fn(tool_call_id, arguments, signal, on_update)
+        if isinstance(value, AgentToolResult):
+            return value
+        return AgentToolResult(
+            content=[TextContent(text=json.dumps(value, ensure_ascii=False, default=str))],
+            details=value if isinstance(value, dict) else {},
+        )
+
+    execute.__name__ = getattr(execute_fn, "__name__", "execute")
+    return execute
+
+
+def catalog(*, capture: bool, workspace: Any = None, home: Any = None) -> list[Any]:
     """AgentTool list when tau_agent is importable, else plain spec dicts."""
-    specs = tool_specs(capture=capture)
+    specs = tool_specs(capture=capture, workspace=workspace, home=home)
     try:
         from tau_agent.tools import AgentTool
     except ImportError:
@@ -289,7 +320,7 @@ def catalog(*, capture: bool) -> list[Any]:
             label=spec["name"],
             description=spec["description"],
             parameters=spec["parameters"],
-            execute_fn=spec["execute_fn"],
+            execute_fn=_as_agent_result(spec["execute_fn"]),
         )
         for spec in specs
     ]

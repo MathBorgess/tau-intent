@@ -18,6 +18,7 @@ prompt outside the freeze.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -80,6 +81,10 @@ class Resumo:
     tokens_saida: int = 0
     amostragem: dict[str, Any] = field(default_factory=dict)
     chamadas: int = 0
+    #: What the provider billed for this summary (sum of its calls), or ``None``
+    #: when any call returned no usage. ``tokens_entrada``/``tokens_saida`` above
+    #: stay in the declared whitespace unit: the two are never mixed.
+    uso_do_provedor: dict[str, int] | None = None
 
 
 def load_rescue_config(path: Path | None = None) -> RescueConfig:
@@ -179,7 +184,8 @@ def montar_corpo_da_requisicao(cfg: RescueConfig, registro: str) -> dict[str, An
 
     E-1, extended to the *second* model call (study note §3.6): sampling is
     stamped in the body and inspected in the body — never trusted to a config
-    object. ``seed`` is not written, because nothing here puts it on the wire.
+    object. ``seed`` is not written here: it belongs to the transport that puts the
+    body on the wire (``rescue_provider``), which stamps and logs it.
     """
     prompt = cfg.prompt_text()
     conteudo = prompt.replace("{registro}", registro) if "{registro}" in prompt else (
@@ -205,6 +211,25 @@ class Sumarizador:
         self.cfg = cfg
         self.provider_fn = provider_fn
         self.corpos: list[dict[str, Any]] = []
+        #: One row per provider call, kept whether its output was applied, rejected by
+        #: the guards or lost to an error: a discarded rewrite cost the model all the
+        #: same (Q3). ``tokens_*`` is ``None`` when the endpoint reported no usage.
+        self.chamadas_log: list[dict[str, Any]] = []
+
+    def _chamar(self, body: dict[str, Any]) -> Any:
+        started = time.monotonic()
+        try:
+            resposta = self.provider_fn(body)
+        except Exception as exc:
+            self.chamadas_log.append({"tokens_in": None, "tokens_out": None,
+                                      "erro": f"{type(exc).__name__}: {exc}"[:200],
+                                      "latency_ms": int((time.monotonic() - started) * 1000)})
+            raise
+        uso = uso_de_resposta(resposta)
+        self.chamadas_log.append({"tokens_in": None if uso is None else uso["tokens_in"],
+                                  "tokens_out": None if uso is None else uso["tokens_out"],
+                                  "latency_ms": int((time.monotonic() - started) * 1000)})
+        return resposta
 
     def __call__(self, corpo: str, contexto: dict[str, Any] | None = None) -> Resumo | None:
         if not deve_disparar(self.cfg, contexto):
@@ -214,7 +239,7 @@ class Sumarizador:
         for parte in partes:
             body = montar_corpo_da_requisicao(self.cfg, parte)
             self.corpos.append(body)
-            resposta = self.provider_fn(body)
+            resposta = self._chamar(body)
             texto = "" if resposta is None else str(
                 resposta.get("text") if isinstance(resposta, dict) else resposta
             )
@@ -234,8 +259,12 @@ class Sumarizador:
                 chamadas=len(partes),
             )
 
+        usos = [uso_de_resposta_log(row) for row in self.chamadas_log[-len(partes):]]
         return Resumo(
             texto="\n\n".join(saidas),
+            uso_do_provedor=None if any(u is None for u in usos) else {
+                "tokens_in": sum(u["tokens_in"] for u in usos),
+                "tokens_out": sum(u["tokens_out"] for u in usos)},
             modelo=self.cfg.modelo_id,
             prompt_sha256=self.cfg.prompt_sha256(),
             tokens_entrada=sum(
@@ -249,6 +278,27 @@ class Sumarizador:
             },
             chamadas=len(partes),
         )
+
+
+def uso_de_resposta(resposta: Any) -> dict[str, int] | None:
+    """Usage an OpenAI-compatible response carried (``prompt_tokens`` /
+    ``completion_tokens``), or ``None``. Plain-text responses carry none."""
+    uso = resposta.get("usage") if isinstance(resposta, dict) else None
+    if not isinstance(uso, dict):
+        return None
+    entrada = uso.get("prompt_tokens", uso.get("tokens_in"))
+    saida = uso.get("completion_tokens", uso.get("tokens_out"))
+    if not isinstance(entrada, int) or not isinstance(saida, int) or isinstance(entrada, bool):
+        return None
+    if entrada == 0 and saida == 0:
+        return None  # a real call never bills nothing: the endpoint did not report
+    return {"tokens_in": entrada, "tokens_out": saida}
+
+
+def uso_de_resposta_log(row: dict[str, Any]) -> dict[str, int] | None:
+    if row.get("tokens_in") is None or row.get("tokens_out") is None:
+        return None
+    return {"tokens_in": row["tokens_in"], "tokens_out": row["tokens_out"]}
 
 
 def sumarizador_de(

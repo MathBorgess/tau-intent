@@ -11,13 +11,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+      - name: install pinned tau and the bench extra (tau-ai==0.4.7, websockets, pytest)
+        run: python -m pip install -e ".[bench]"
       - name: test (offline)
         run: PYTHONPATH=src python3 -m unittest discover -s tests -v
         env:
           NO_NETWORK: "1"
-      - name: pin check
-        run: PYTHONPATH=src python3 -m tau_intent.pin --check
+      - name: pin check (must PASS, a SKIP fails the job)
+        run: PYTHONPATH=src python3 -m tau_intent.pin --check --require-installed
         env:
           NO_NETWORK: "1"
 
@@ -29,7 +31,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+      - name: install pinned tau (tau-ai==0.4.7)
+        run: python -m pip install -e ".[tau]"
       - name: bancada B x C
         run: PYTHONPATH=src python3 -m unittest tests.test_integration_bench -v
         env:
