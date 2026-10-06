@@ -103,6 +103,18 @@ class ArmWorkspace:
         self._git("commit", "-q", "--allow-empty", "--no-verify", "-m", message)
         return self.head()
 
+    def discard_attempt(self, before: str, tag: str) -> str:
+        """An attempt lost to infrastructure: tag what it left, then go back to ``before``.
+
+        The tag keeps the discarded commit in the bundle (``bundle --all``) for audit;
+        ``main`` stays one commit per task.
+        """
+        lost = self.head()
+        self._git("tag", "-f", tag, lost)
+        self._git("reset", "-q", "--hard", before)
+        self._git("clean", "-q", "-fdx")
+        return lost
+
     def evolution(self, before: str, after: str) -> Evolution:
         files = insertions = deletions = 0
         numstat = self._git("diff", "--numstat", "--no-renames", before, after)

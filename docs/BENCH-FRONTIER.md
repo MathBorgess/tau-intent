@@ -1,0 +1,176 @@
+# Bench — frontier strand (shared contract)
+
+**Status:** instrument, not measured collection. Records carry `"draft": true`
+like every bench record before G2. Identical copies live in
+`MathBorgess/mathai-harness` and `MathBorgess/tau-intent` (`docs/BENCH-FRONTIER.md`);
+change both or neither.
+
+## 0. What this strand is
+
+The local strand (V0 / V0.2) runs **small local models** over the **small**
+`tidelot` repository, one cell per participant machine, at a Gambiarra event.
+This strand runs **three frontier families** over the **same chain of six tasks,
+byte for byte**, grown into a **~15x larger repository**, on the owner's machine,
+through the owner's own subscriptions:
+
+| Family | Model (declared in `frontier.lock.json`) | Reached through | Protocol |
+|---|---|---|---|
+| anthropic | `claude-opus-5-5` | `proxies/claude` (Claude Code session) | Anthropic Messages |
+| openai | `gpt-6.1-sol` | `proxies/codex` (Codex CLI ChatGPT session) | Responses (ChatGPT Codex backend) |
+| google | `gemini-3.8-flash` | `proxies/antigravity` (Antigravity Google session) | Gemini API, served by Cloud Code Assist |
+
+The contrast the TG reads is **between regimes** (small repository + local model
+vs larger repository + frontier model), descriptive. The inferential contrasts stay
+**within a cell** (B×A, B×C, paired by task), exactly as in the local strand. Model
+class and repository size move together by design; this strand does not separate
+them (a "bridge" — frontier models on the small task set — is one line in the lock,
+`plan.tasksets: ["harbour", "small"]`, if the owner wants it).
+
+## 1. What is identical across the two strands
+
+| | Local strand | Frontier strand |
+|---|---|---|
+| Mechanism | tau-intent, arms A/B/C as flags of one binary | same build (`tau_intent_sha` in every record) |
+| Agent loop | pinned `tau-ai==0.4.7` `AgentHarness` | same; tau's own provider for each protocol |
+| Runner | `tau-intent bench` | same command, `--offline` |
+| Tasks | `taskset/` (tidelot, K=6, Q0) | `taskset-harbour/`: same `tasks/`, `qualification/`, `decisions.json`; **`task_hash(k)` equal for every k** (checked by `grow` and by a test) |
+| Oracle | hidden tests 1..k, outside the workspace | same tests, same rule |
+| Records | `gambiarra-coleta-2` | same schema; the additions of §4 are additive |
+| One commit per task per arm, bundles, transcripts, manifests | yes | yes |
+
+## 2. What differs, and where it is declared
+
+| | Local | Frontier | Declared in |
+|---|---|---|---|
+| Repository | `tidelot` seed, 8 files | `tidelot` + `harbour/` host, 78 files (≈3.1k lines of Python against 210, 189 host tests) | `taskset-harbour/taskset.json` (`derived_from`, `regression`) |
+| Wire protocol | OpenAI `/chat/completions` | native per family | record `model.provider_api` |
+| Sampling | `temperature=0` + `seed` stamped on the wire | **`provider-default`**: no sampling field sent, and the wire log proves none left (§3) | lock `families.*.sampling`; record `model.sampling`, `model.seed_on_wire` |
+| Reasoning depth | n/a | `reasoning_effort` per family (default `high` for all three) | lock; record `model.reasoning_effort` |
+| Output cap | tau default | `max_output_tokens` (32000 Anthropic/Google; Codex: backend default) | lock; record |
+| System prompt | agent prompt | same; **Anthropic adds the identity block a subscription token requires** before it (same in every arm) | record `model.system_prefix` |
+| Turn cap / deadline | 8 productive turns, 600 s | 30 productive turns, 1800 s (bigger repository, more navigation) | lock `plan` |
+| Infrastructure failures | recorded as error, never retried (V0.2) | a unit lost to quota/credentials/provider/proxy is **discarded and re-run from the state before it** (§5) | lock `infra`; record `infra_retries` |
+| Host regression | none | frozen host suite run after every unit, descriptive (§6) | record `host_regression` |
+| Where it runs | arena + LAN backends | offline, one machine, `mathai_harness.frontier` | `docs/FRONTIER.md` |
+
+## 3. Sampling: why `provider-default`, and how it is checked
+
+AGENTS.md rule 8 (tau-intent) says sampling is stamped on the wire and checked on
+the wire. Two of the three frontier models **refuse** sampling fields: Claude Opus
+5.5 rejects `temperature`/`top_p`/`top_k` with a 400, and the reasoning models on the
+ChatGPT Codex backend do not take `temperature`. Gemini 3.x accepts them, but Google
+advises leaving `temperature` at its default (lower values can loop). The lock
+therefore declares `provider-default` for all three, uniformly, and the runner
+**checks** it the same way it checks a stamp: `WireLog.report()["conferida_no_fio"]`
+is true only if no request body carried any sampling knob of its protocol
+(`SAMPLING_KNOBS` in `provider_api.py`). No protocol of the three carries the cell's
+seed under this policy: `seed` is a label of the cell (and picks the arm order), not
+a property of the call. `stamped` remains available per family (Gemini would get
+`generationConfig.temperature` and `generationConfig.seed`); the preflight refuses a
+cell whose model rejects what was declared (HTTP 400 before any counted unit).
+
+Consequence for the analysis: frontier trajectories are **not deterministic**
+replays; the paired within-cell design and the seeds (replicates) carry the noise.
+
+## 4. Runner additions (`tau-intent bench`)
+
+Flags, all offline-only (the arena's schemas know local runners):
+
+```
+--provider-api {openai-completions,anthropic-messages,openai-codex-responses,google-generative-ai}
+--sampling {stamped,provider-default}     required for any protocol but openai-completions
+--reasoning-effort LEVEL                  Anthropic output_config.effort / Codex reasoning.effort / Gemini thinkingConfig
+--max-output-tokens N
+--model-family NAME   --strand NAME
+--infra-retries N  --infra-wait-s S  --infra-max-wait-s S
+```
+
+Record additions (additive; the local strand's records are unchanged):
+
+- `model.provider_api`, `model.sampling`, `model.seed_on_wire`, `model.reasoning_effort`,
+  `model.max_output_tokens`, `model.system_prefix`, `model.family`; `model.runner_kind` is `"other"`.
+- `error.kind` gains three infrastructure kinds read from the proxy's HTTP status:
+  `quota_exhausted` (429), `credentials_unavailable` (401/403), `provider_unavailable`
+  (500/502/503/504/529), or, when the provider fails inside a 200 stream, from its error
+  text (rate/usage limit, quota, resource exhausted -> `quota_exhausted`; overloaded,
+  service unavailable -> `provider_unavailable`). Like `backend_unreachable`, the analysis
+  drops them; they are never a failed task.
+- `infra_retries[]` (only when a unit was retried): each discarded attempt with its
+  kind, detail, **tokens**, turns, times, the tag of its commit and where its
+  artifacts went.
+- `host_regression` (only when the task set declares one): the oracle block of the
+  frozen host suite, `per_test` limited to tests that did not pass.
+- `cell.json`: `strand`, `protocol`, `infra_retry_policy`, `host_regression`, and the
+  preflight's `status`, `sampling_ok`, `answered_by`.
+
+Tokens: outcome tokens are the provider's own usage per call, as in the local strand.
+tau 0.4.7's Google parser drops `usageMetadata`; the runner reads it off the response
+bytes (`UsageFromWire`) and records it as `provider_usage` (it is the provider's
+figure, read one layer lower), with `thoughtsTokenCount` counted as output.
+
+## 5. Infrastructure retries
+
+Subscriptions have windows (five-hour, weekly) and sessions expire; a long run will
+meet both. A unit whose provider call ended in one of the four infrastructure kinds
+is **discarded and run again from the state before it**: the arm's repository is reset
+to the commit before the unit (the discarded commit is kept under the tag
+`infra/<arm>-task-<k>/attempt-<n>`, so `bundle --all` carries it), the arm's intent
+store is restored byte for byte, the unit's artifacts move to `<unit>.infra-<n>/`, and
+the runner waits `min(wait_s * 2^(n-1), max_wait_s)` before the next attempt. After
+`retries` attempts the unit is recorded as that infrastructure error. Nothing is
+hidden: every discarded attempt, its tokens included, is in the final record.
+
+Known limit: a rescue call of arm C refused for quota mid-unit degrades that unit to
+B for that call (`falha_politica: degradar_sem_sumarizar`, recorded in
+`mechanism_telemetry.llm_rescue_*`); it is not retried.
+
+## 6. The grown task set
+
+`python -m mathai_harness.taskset grow taskset taskset-hosts/harbour taskset-harbour`
+composes `seed` and every `reference/k` as *small tree + host overlay*, copies
+`tasks/`, `qualification/`, `decisions.json` byte for byte, freezes the composed seed's
+`tests/` as `regression/tests`, and refuses an overlay that touches any file a task
+changes or replaces a seed file it did not declare. Sanity adds **R5**: the seed and
+every reference pass the host suite (so a red host suite is the agent's doing). The
+committed `taskset-harbour/` is checked against a fresh `grow` by a test (no drift).
+
+## 7. Proxies (`mathai_harness.proxies`)
+
+Same design as `graph-engineering-lab/proxy`: the client's own provider owns tool
+schemas, ids and streaming; the proxy reads the credential the vendor's CLI saved
+(on every request, never refreshed or rewritten, with one opt-in in-memory exception
+for Antigravity) and forwards. Header forwarding, untranslated upstream errors and a
+metadata event log follow `jev-gateway`. The Antigravity proxy serves the public
+Gemini API surface (model and method in the path, `?alt=sse`) and wraps/unwraps
+Cloud Code Assist's `v1internal` envelope; its hosts, envelope fields, project and
+model names are configuration because they are **not verified live**.
+
+| Proxy | Port | Credential (first found) | Missing/expired |
+|---|---|---|---|
+| claude | 8801 | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`), Keychain `Claude Code-credentials`, `~/.claude/.credentials.json` | 401 `proxy_credentials_unavailable` + fix |
+| codex | 8802 | `CODEX_ACCESS_TOKEN`+`CODEX_ACCOUNT_ID`, `~/.codex/auth.json` (`tokens`) | same |
+| antigravity | 8803 | `ANTIGRAVITY_ACCESS_TOKEN`, `ANTIGRAVITY_TOKEN_FILE`, keyring service `gemini` account `antigravity` | same |
+
+## 8. Orchestration (`python -m mathai_harness.frontier`)
+
+`frontier.lock.json` declares task sets (with frozen `task_set_sha`), the plan
+(seeds, arm orders, `k_max`, deadline, turn cap), the infrastructure policy, the
+families and the proxy ports. A cell is one (family, task set, seed); seed *i* runs the
+arms in `arm_orders[i mod 3]`, so with three seeds every arm is first, second and third
+once per family. Families run side by side; cells of a family run one after the other
+(one subscription's quota). A finished cell is never re-run; an interrupted one is
+parked in `.aborted/` and restarted. `probe` makes one real round trip per family
+(preflight + Q0, which needs tool calls) before anything counted. `export` writes
+records, cells, a summary, the bundles and `freeze.json` (lock, hashes, runner build,
+proxy log digests).
+
+## 9. Not verified, and open for the owner
+
+- **Nothing here has run against a live subscription.** The proxies, the runner and
+  the orchestrator are tested offline (contract tests, stub servers, an end-to-end run
+  against fake vendor upstreams). `frontier probe` is the gate.
+- Whether the Antigravity backend serves `gemini-3.8-flash` under that id (else
+  `proxies.antigravity.model_map`), on which host, and with which envelope fields.
+- Sampling `provider-default` for all three families (§3), effort `high` for all three,
+  output caps, turn cap 30 and deadline 1800 s: declared defaults, owner decisions.
+- Terms of service of each subscription for automated use: the owner's call.

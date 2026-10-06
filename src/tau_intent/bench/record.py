@@ -31,7 +31,12 @@ HARDWARE_SOURCES = ("local", "declared")
 TRANSPORTS = ("lan", "local")
 #: ``error.kind`` of a unit that ended in ``error`` (V0.2). ``backend_unreachable`` is
 #: infrastructure: the analysis drops those units, it never counts them as failures.
-ERROR_KINDS = ("backend_unreachable", "provider_error", "instrument_error", "not_run")
+#: The frontier strand adds three more infrastructure kinds, read from the HTTP status
+#: of the subscription proxy: a spent quota (429), a credential the proxy could not
+#: use (401/403), and a provider that was down (500/502/503/504/529).
+INFRA_ERROR_KINDS = ("backend_unreachable", "quota_exhausted", "credentials_unavailable",
+                     "provider_unavailable")
+ERROR_KINDS = INFRA_ERROR_KINDS + ("provider_error", "instrument_error", "not_run")
 
 
 def now_iso() -> str:
