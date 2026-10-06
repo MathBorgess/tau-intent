@@ -83,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="provider-native depth (Anthropic output_config.effort, Codex reasoning.effort, "
                                "Gemini thinkingConfig); default: the provider's own")
     frontier.add_argument("--max-output-tokens", type=int, help="per-response cap; default: tau's for the protocol")
+    frontier.add_argument("--anthropic-oauth-identity", action="store_true",
+                          help="anthropic-messages only: prepend the Claude Code identity sentence some subscription "
+                               "tokens require (off by default: the model sees the agent's prompt and nothing else)")
     frontier.add_argument("--model-family", help="label stored as model.family (e.g. anthropic, openai, google)")
     frontier.add_argument("--strand", help="label stored in cell.json (e.g. frontier)")
     frontier.add_argument("--infra-retries", type=int, default=0,
@@ -135,6 +138,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                      "the arena's schemas know local runners")
     if native and args.runner_kind not in (None, "other"):
         parser.error("a native-protocol cell is not a local runner: drop --runner-kind")
+    if args.anthropic_oauth_identity and args.provider_api != api_mod.ANTHROPIC_MESSAGES:
+        parser.error("--anthropic-oauth-identity is for --provider-api anthropic-messages")
     if args.infra_retries and not native:
         parser.error("--infra-retries is for native-protocol cells; the local strand never retries (V0.2)")
 
@@ -174,7 +179,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         backend_id=args.backend_id,
         provider_api=args.provider_api, sampling=sampling, reasoning_effort=args.reasoning_effort,
         max_output_tokens=args.max_output_tokens, infra_retries=max(0, args.infra_retries),
-        infra_wait_s=args.infra_wait_s, infra_max_wait_s=args.infra_max_wait_s, strand=args.strand)
+        infra_wait_s=args.infra_wait_s, infra_max_wait_s=args.infra_max_wait_s, strand=args.strand,
+        anthropic_oauth_identity=args.anthropic_oauth_identity)
     args.out.mkdir(parents=True, exist_ok=True)
     log(f"task set {taskset.id} {taskset.version} sha {taskset.sha[:12]} ({len(taskset.tasks)} tasks); "
         f"model {args.model} via {args.provider_api if native else kind} at "

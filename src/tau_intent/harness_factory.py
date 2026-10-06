@@ -67,8 +67,10 @@ class ProviderSpec:
     reasoning_effort: str | None = None
     #: ``None`` = tau's default for the protocol (4096 on Anthropic).
     max_output_tokens: int | None = None
-    #: Anthropic over a subscription token: send the identity block OAuth requires.
-    anthropic_oauth_identity: bool = True
+    #: Anthropic over a subscription token: prepend the Claude Code identity block some
+    #: subscriptions require. Off by default: the call is the agent's prompt and nothing
+    #: else; ``frontier probe`` measures whether a subscription refuses it without.
+    anthropic_oauth_identity: bool = False
 
     def stamp(self) -> dict[str, Any]:
         return api_mod.stamp_for(self.api, self.sampling, temperature=self.temperature, seed=self.seed)
@@ -260,7 +262,8 @@ def build_provider(spec: ProviderSpec, client: Any, wire: WireLog, *, max_retrie
                 api_key=spec.api_key,
                 bearer_auth=True,  # the proxy swaps the bearer for the subscription's
                 base_url=_versioned(spec.base_url, "/v1"),
-                headers={"anthropic-beta": api_mod.ANTHROPIC_OAUTH_BETA} if identity else None,
+                # Only the beta an OAuth bearer needs; no Claude Code harness beta.
+                headers={"anthropic-beta": api_mod.ANTHROPIC_OAUTH_BETA},
                 timeout_seconds=spec.timeout_s,
                 max_retries=max_retries,
                 max_tokens=out_tokens,

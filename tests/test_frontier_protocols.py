@@ -200,19 +200,24 @@ class TestNativeHarness(unittest.TestCase):
         self.assertEqual((root / "src" / "mod.py").read_text(), "def f():\n    return 1\n")
         return stub, harness, result
 
-    def test_anthropic_identity_block_beta_and_no_sampling_field(self):
+    def test_anthropic_identity_block_only_when_declared(self):
+        stub, harness, result = self.run_arm(ANTHROPIC, "provider-default", anthropic_oauth_identity=True)
+        for body in stub.requests:
+            self.assertEqual([b["text"] for b in body["system"]], [api_mod.ANTHROPIC_OAUTH_IDENTITY, system_prompt()])
+        self.assertEqual(result.manifest["amostragem_conferida_no_fio"], True)
+
+    def test_anthropic_beta_effort_caps_and_no_sampling_field(self):
         stub, harness, result = self.run_arm(ANTHROPIC, "provider-default", reasoning_effort="high",
                                              max_output_tokens=32000)
         self.assertEqual(stub.model_paths(), ["/v1/messages"] * 2)
         for body, headers in zip(stub.requests, stub.headers):
             self.assertEqual(body["model"], "claude-opus-5-5")
             self.assertNotIn("temperature", body)
-            self.assertEqual(body["system"][0]["text"], api_mod.ANTHROPIC_OAUTH_IDENTITY)
             self.assertEqual(body["thinking"]["type"], "adaptive")
             self.assertEqual(body["output_config"], {"effort": "high"})
             self.assertEqual(body["max_tokens"], 32000)
             self.assertNotIn("tool_choice", body)  # forced tool use 400s on Opus 5.5
-            self.assertIn(api_mod.ANTHROPIC_OAUTH_BETA, headers.get("anthropic-beta", ""))
+            self.assertEqual(headers.get("anthropic-beta"), api_mod.ANTHROPIC_OAUTH_BETA)  # no harness beta
             self.assertTrue(headers["authorization"].startswith("Bearer "))
         report = harness.wire.report()
         self.assertTrue(report["conferida_no_fio"])
@@ -254,6 +259,61 @@ class TestNativeHarness(unittest.TestCase):
             self.assertNotIn("temperature", body.get("generationConfig", {}))
             self.assertNotIn("seed", body.get("generationConfig", {}))
         self.assertTrue(harness.wire.report()["conferida_no_fio"])
+
+
+#: ``tau_ai.openai_codex._build_codex_payload``: ``"instructions": system or "You are a helpful assistant."``.
+TAU_CODEX_EMPTY_SYSTEM = "You are a helpful assistant."
+
+
+def system_prompt() -> str:
+    from tau_intent.harness_factory import system_prompt as prompt
+
+    return prompt()
+
+
+def system_text(api: str, body: dict) -> str:
+    """Every system-level text of a request body, joined (empty when there is none)."""
+    if api == ANTHROPIC:
+        system = body.get("system") or ""
+        return system if isinstance(system, str) else "\n".join(b.get("text", "") for b in system)
+    if api == CODEX:
+        texts = [body.get("instructions") or ""]
+        texts += [c.get("text", "") for item in body.get("input", []) if item.get("role") in ("system", "developer")
+                  for c in item.get("content", []) if isinstance(c, dict)]
+        return "\n".join(t for t in texts if t)
+    return "\n".join(p.get("text", "") for p in (body.get("systemInstruction") or {}).get("parts", []))
+
+
+@unittest.skipUnless(READY, "needs pytest and tau-ai (pip install .[bench])")
+class TestNoHarnessOnTheWire(unittest.TestCase):
+    """A cell's request carries the agent's prompt, the mechanism's tools and the task —
+    nothing of Claude Code, Codex or Antigravity. Checked on every request of a whole cell
+    (agent turns, arm C's rescue, the preflight), for each protocol."""
+
+    TOOLS = {"read", "write", "edit", "bash", "record_intent"}
+
+    def test_every_request_of_a_cell_is_the_mechanism_and_nothing_else(self):
+        prompt = system_prompt()
+        for api in (ANTHROPIC, CODEX, GOOGLE):
+            with self.subTest(api=api), tempfile.TemporaryDirectory() as tmp, \
+                    NativeStub(api, NativeDemoModel(api)) as stub:
+                code, stdout = run_cell(Path(tmp), stub, arms="A,B,C")
+                self.assertEqual(code, 0, stdout)
+            agent = [b for b in stub.requests if tool_names(api, b)]
+            bare = [b for b in stub.requests if not tool_names(api, b)]  # preflight and rescue
+            self.assertTrue(agent and len(bare) >= 2, (len(agent), len(bare)))
+            for body in agent:
+                self.assertEqual(system_text(api, body), prompt)
+                self.assertLessEqual(set(tool_names(api, body)), self.TOOLS)
+            for body in bare:
+                # tau's Codex provider (not the proxy, not Codex) fills an empty system prompt
+                # with this sentence; it is the only text a bare call carries.
+                self.assertEqual(system_text(api, body), TAU_CODEX_EMPTY_SYSTEM if api == CODEX else "")
+            dump = json.dumps(stub.requests)
+            for marker in ("Claude Code", "Codex CLI", "Antigravity", "requestType"):
+                self.assertNotIn(marker, dump, (api, marker))
+            for headers in stub.headers:
+                self.assertNotIn("claude-code", headers.get("anthropic-beta", ""))
 
 
 @unittest.skipUnless(READY, "needs pytest and tau-ai (pip install .[bench])")
@@ -408,6 +468,10 @@ class TestFrontierCell(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             bench_main(["--offline", "--provider-api", CODEX, "--provider-url", "http://127.0.0.1:1",
                         "--model", "m", "--taskset", str(DEMO), "--out", "/tmp/x", "--skip-pin-check"])
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            bench_main(["--offline", "--provider-api", CODEX, "--sampling", "provider-default",
+                        "--anthropic-oauth-identity", "--provider-url", "http://127.0.0.1:1", "--model", "m",
+                        "--taskset", str(DEMO), "--out", "/tmp/x", "--skip-pin-check"])
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             bench_main(["--offline", "--infra-retries", "2", "--provider-url", "http://127.0.0.1:1",
                         "--model", "m", "--taskset", str(DEMO), "--out", "/tmp/x", "--skip-pin-check"])

@@ -56,9 +56,11 @@ SAMPLING_KNOBS: dict[str, tuple[str, ...]] = {
              "generationConfig.topP", "generationConfig.topK"),
 }
 
-#: First system block a Claude subscription (OAuth) token requires; tau's own OAuth
-#: path sends the same text (``tau_coding.provider_runtime``). It is sent as a separate
-#: block before the agent's prompt, identical in every arm, and stamped in the manifest.
+#: First system block some Claude subscription (OAuth) tokens require; tau's own OAuth
+#: path sends the same text (``tau_coding.provider_runtime``). Sent only when the cell
+#: declares ``--anthropic-oauth-identity`` (off by default: no harness text reaches the
+#: model), as a separate block before the agent's prompt, identical in every arm, and
+#: stamped in the manifest (``system_prefix``).
 ANTHROPIC_OAUTH_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 #: The beta an OAuth bearer needs on the Messages API (the proxy adds it too).
 ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20"

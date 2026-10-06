@@ -47,7 +47,7 @@ them (a "bridge" — frontier models on the small task set — is one line in th
 | Sampling | `temperature=0` + `seed` stamped on the wire | **`provider-default`**: no sampling field sent, and the wire log proves none left (§3) | lock `families.*.sampling`; record `model.sampling`, `model.seed_on_wire` |
 | Reasoning depth | n/a | `reasoning_effort` per family (default `high` for all three) | lock; record `model.reasoning_effort` |
 | Output cap | tau default | `max_output_tokens` (32000 Anthropic/Google; Codex: backend default) | lock; record |
-| System prompt | agent prompt | same; **Anthropic adds the identity block a subscription token requires** before it (same in every arm) | record `model.system_prefix` |
+| System prompt | agent prompt | **the same agent prompt and nothing else** (§7.1); a Claude subscription that refuses that gets one identity sentence only if the owner declares it after `probe` measured the refusal | lock `families.anthropic.oauth_identity` (default `false`); record `model.system_prefix` |
 | Turn cap / deadline | 8 productive turns, 600 s | 30 productive turns, 1800 s (bigger repository, more navigation) | lock `plan` |
 | Infrastructure failures | recorded as error, never retried (V0.2) | a unit lost to quota/credentials/provider/proxy is **discarded and re-run from the state before it** (§5) | lock `infra`; record `infra_retries` |
 | Host regression | none | frozen host suite run after every unit, descriptive (§6) | record `host_regression` |
@@ -137,7 +137,7 @@ committed `taskset-harbour/` is checked against a fresh `grow` by a test (no dri
 ## 7. Proxies (`mathai_harness.proxies`)
 
 Same design as `graph-engineering-lab/proxy`: the client's own provider owns tool
-schemas, ids and streaming; the proxy reads the credential the vendor's CLI saved
+schemas, ids and streaming; the proxy adds the credential and nothing else (§7.1). It reads the credential the vendor's CLI saved
 (on every request, never refreshed or rewritten, with one opt-in in-memory exception
 for Antigravity) and forwards. Header forwarding, untranslated upstream errors and a
 metadata event log follow `jev-gateway`. The Antigravity proxy serves the public
@@ -150,6 +150,34 @@ model names are configuration because they are **not verified live**.
 | claude | 8801 | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`), Keychain `Claude Code-credentials`, `~/.claude/.credentials.json` | 401 `proxy_credentials_unavailable` + fix |
 | codex | 8802 | `CODEX_ACCESS_TOKEN`+`CODEX_ACCOUNT_ID`, `~/.codex/auth.json` (`tokens`) | same |
 | antigravity | 8803 | `ANTIGRAVITY_ACCESS_TOKEN`, `ANTIGRAVITY_TOKEN_FILE`, keyring service `gemini` account `antigravity` | same |
+
+### 7.1 No vendor harness on the wire
+
+The model under test must see the mechanism's harness (tau-intent's agent prompt, its
+tool catalogue, the task) and nothing of Claude Code, Codex or Antigravity. Each
+layer, what it puts on the wire, and how that is enforced:
+
+| Layer | Puts on the wire | Never | Enforced by |
+|---|---|---|---|
+| tau-intent runner | agent prompt (`prompts/agent-system-v1.txt`), tools `read`/`write`/`edit`/`bash` (+ `record_intent` in B/C), the task; preflight and rescue calls carry **no** system prompt and **no** tools | any vendor prompt, beta or tool | `tests/test_frontier_protocols.py::TestNoHarnessOnTheWire` (every request of a whole cell, three protocols) |
+| tau's own providers (pinned, not edited) | protocol knobs: Anthropic `cache_control` breakpoints, `max_tokens` (4096 if not declared); Codex `text.verbosity: "low"`, `include: ["reasoning.encrypted_content"]`, `tool_choice: "auto"`, `parallel_tool_calls: true`, and **`instructions: "You are a helpful assistant."` when the system prompt is empty** (preflight and rescue only); Gemini nothing beyond the declared caps | system text of their own on agent calls | same test (the Codex fallback is the only text allowed on a bare call) |
+| claude proxy | the subscription bearer; `anthropic-beta: oauth-2025-04-20`; body byte for byte | `claude-code-*` betas, Claude Code's system prompt or tools | `tests/test_proxies.py` (only `authorization` and `anthropic-beta` differ); extra betas only via `CLAUDE_PROXY_EXTRA_BETAS`, declared at `/health` |
+| codex proxy | the subscription bearer, `chatgpt-account-id`; `stream: true`, `store: false` (the backend serves nothing else) | Codex's instructions, tools or `originator` | `tests/test_proxies.py` (a tau request crosses unchanged) |
+| antigravity proxy | the subscription bearer, `User-Agent: mathai-harness-proxy`; envelope `{model, project, request}` with `request` the client's body unchanged | `requestType: "agent"`, `userAgent`, Antigravity's system instruction or tools | `tests/test_proxies.py`; extras only via `ANTIGRAVITY_ENVELOPE_EXTRA` / `ANTIGRAVITY_USER_AGENT`, declared at `/health` |
+| whole chain | — | any of the above | `frontier e2e`: the fake vendor upstreams answer 401 to any call whose system text is not the agent's own (or empty), whose tools are not the mechanism's, that carries a `claude-code` beta or an envelope field beyond `{model, project, request}`; negative controls (re-enabling the Claude Code beta or the agent envelope) make the e2e fail |
+
+Every proxy declares at `/health` (`adds`) exactly what it changes; `frontier` records
+those declarations in `proxies/proxies.json` and in `export/freeze.json`
+(`proxy_declarations`), so the dataset cites what reached the model.
+
+The one exception that may be needed is measured, not assumed: some Claude
+subscription tokens are only served to Claude Code and refuse a call without the
+sentence `You are Claude Code, Anthropic's official CLI for Claude.` as the first
+system block. `frontier probe` tries the pure call first; only if it is refused does
+it try once with the sentence and tell the owner to declare
+`families.anthropic.oauth_identity = true`. Declared, the sentence is one block
+before the agent's prompt, identical in every arm, stamped as `model.system_prefix`.
+Nothing else of Claude Code comes with it (no beta, no prompt, no tools).
 
 ## 8. Orchestration (`python -m mathai_harness.frontier`)
 

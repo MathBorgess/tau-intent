@@ -152,6 +152,10 @@ tau-intent bench --offline --arms A,B,C --seed 7 \
 - A unit lost to infrastructure (429, 401/403, 5xx from the proxy; the proxy gone) is discarded and run
   again from the state before it (`--infra-retries`); the record lists every discarded attempt with its
   tokens. The local strand keeps V0.2's rule (never retried): `--infra-retries` is refused there.
+- No vendor harness reaches the model: the call carries the agent's prompt, the mechanism's tools and
+  the task (checked on every request of a cell, `TestNoHarnessOnTheWire`). `--anthropic-oauth-identity`
+  prepends the one Claude Code identity sentence some subscriptions require; off by default, declared
+  only after `frontier probe` measured a refusal.
 - A task set may declare a frozen host suite (`"regression"`): it runs after every unit as
   `host_regression`, descriptive, never part of `oracle.pass`.
 - Gemini's `usageMetadata`, which tau 0.4.7's parser drops, is read off the response bytes

@@ -115,11 +115,14 @@ class CellSettings:
     infra_max_wait_s: float = 3600.0
     #: Label of the strand in ``cell.json`` (``None``: the local strand).
     strand: str | None = None
+    #: Anthropic only: prepend the subscription identity block (declared, off by default).
+    anthropic_oauth_identity: bool = False
 
     def spec(self, seed: int, timeout_s: float) -> ProviderSpec:
         return ProviderSpec(self.provider_url, self.model, seed, timeout_s=timeout_s, api_key=self.api_key,
                             api=self.provider_api, sampling=self.sampling,
-                            reasoning_effort=self.reasoning_effort, max_output_tokens=self.max_output_tokens)
+                            reasoning_effort=self.reasoning_effort, max_output_tokens=self.max_output_tokens,
+                            anthropic_oauth_identity=self.anthropic_oauth_identity)
 
     @property
     def native(self) -> bool:
@@ -600,7 +603,12 @@ class CellRunner:
         status = preflight.get("status") or 0
         if status >= 400:
             kind = INFRA_STATUS.get(status, "provider_refused")
-            raise CellError(kind, f"the preflight request was refused (HTTP {status}): {preflight['error']}")
+            hint = ""
+            if (self.s.provider_api == api_mod.ANTHROPIC_MESSAGES and not self.s.anthropic_oauth_identity
+                    and status in (400, 401, 403)):
+                hint = (" (if the subscription only serves Claude Code, declare --anthropic-oauth-identity: "
+                        "one identity sentence before the agent's prompt, same in every arm)")
+            raise CellError(kind, f"the preflight request was refused (HTTP {status}): {preflight['error']}{hint}")
         if preflight["sampling_ok"] is False:
             raise CellError("sampling_not_on_wire", f"the request body did not carry the declared sampling "
                                                     f"policy {self.s.sampling!r}")
