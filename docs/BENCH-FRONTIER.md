@@ -13,11 +13,15 @@ This strand runs **three frontier families** over the **same chain of six tasks,
 byte for byte**, grown into a **~15x larger repository**, on the owner's machine,
 through the owner's own subscriptions:
 
-| Family | Model (declared in `frontier.lock.json`) | Reached through | Protocol |
+| Family | Model in round 1 (declared in `frontier.lock.json`) | Reached through | Protocol |
 |---|---|---|---|
-| anthropic | `claude-opus-5-5` | `proxies/claude` (Claude Code session) | Anthropic Messages |
-| openai | `gpt-6.1-sol` | `proxies/codex` (Codex CLI ChatGPT session) | Responses (ChatGPT Codex backend) |
+| anthropic | `claude-haiku-5-5` | `proxies/claude` (Claude Code session) | Anthropic Messages |
+| openai | `gpt-6-luna` | `proxies/codex` (Codex CLI ChatGPT session) | Responses (ChatGPT Codex backend) |
 | google | `gemini-3.8-flash` | `proxies/antigravity` (Antigravity Google session) | Gemini API, served by Cloud Code Assist |
+
+Round 1 is the light tier of each family (owner decision, 2026-10-08). The lock is
+the authority: a later round changes `families.*.model` by pull request and runs
+under a new run name, and every run's `freeze.json` carries the lock it ran with.
 
 The contrast the TG reads is **between regimes** (small repository + local model
 vs larger repository + frontier model), descriptive. The inferential contrasts stay
@@ -56,11 +60,12 @@ them (a "bridge" — frontier models on the small task set — is one line in th
 ## 3. Sampling: why `provider-default`, and how it is checked
 
 AGENTS.md rule 8 (tau-intent) says sampling is stamped on the wire and checked on
-the wire. Two of the three frontier models **refuse** sampling fields: Claude Opus
-5.5 rejects `temperature`/`top_p`/`top_k` with a 400, and the reasoning models on the
-ChatGPT Codex backend do not take `temperature`. Gemini 3.x accepts them, but Google
-advises leaving `temperature` at its default (lower values can loop). The lock
-therefore declares `provider-default` for all three, uniformly, and the runner
+the wire. Frontier models **refuse** sampling fields: Claude Opus 5.5 rejects
+`temperature`/`top_p`/`top_k` with a 400, and the reasoning models on the ChatGPT
+Codex backend (GPT-6 Sol and Luna) do not take `temperature`. Gemini 3.x accepts
+them, but Google advises leaving `temperature` at its default (lower values can
+loop). The lock therefore declares `provider-default` for every family in every
+round, uniformly, and the runner
 **checks** it the same way it checks a stamp: `WireLog.report()["conferida_no_fio"]`
 is true only if no request body carried any sampling knob of its protocol
 (`SAMPLING_KNOBS` in `provider_api.py`). No protocol of the three carries the cell's
