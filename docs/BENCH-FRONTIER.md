@@ -50,9 +50,9 @@ them (a "bridge" — frontier models on the small task set — is one line in th
 | Wire protocol | OpenAI `/chat/completions` | native per family | record `model.provider_api` |
 | Sampling | `temperature=0` + `seed` stamped on the wire | **`provider-default`**: no sampling field sent, and the wire log proves none left (§3) | lock `families.*.sampling`; record `model.sampling`, `model.seed_on_wire` |
 | Reasoning depth | n/a | `reasoning_effort` per family (default `high` for all three) | lock; record `model.reasoning_effort` |
-| Output cap | tau default | `max_output_tokens` (32000 Anthropic/Google; Codex: backend default) | lock; record |
+| Output cap | tau default | `max_output_tokens`: **no artificial cap** since round 2 -- each model's own maximum (Anthropic 128000, Google 65536; Codex: nothing sent, backend default). Declared as the maximum because tau's Anthropic provider sends 4096 when nothing is declared. Round 1 used 32000 Anthropic/Google | lock; record |
 | System prompt | agent prompt | **the same agent prompt and nothing else** (§7.1); a Claude subscription that refuses that gets one identity sentence only if the owner declares it after `probe` measured the refusal | lock `families.anthropic.oauth_identity` (default `false`); record `model.system_prefix` |
-| Turn cap / deadline | 8 productive turns, 600 s | 30 productive turns, 1800 s (bigger repository, more navigation) | lock `plan` |
+| Turn cap / deadline | 8 productive turns, 600 s | **32 productive turns**; deadline 3600 s as a safety ceiling only (round 2, owner decision 2026-10-08). Round 1: 8 / 600 s; design default was 30 / 1800 s | lock `plan` |
 | Infrastructure failures | recorded as error, never retried (V0.2) | a unit lost to quota/credentials/provider/proxy is **discarded and re-run from the state before it** (§5) | lock `infra`; record `infra_retries` |
 | Host regression | none | frozen host suite run after every unit, descriptive (§6) | record `host_regression` |
 | Where it runs | arena + LAN backends | offline, one machine, `mathai_harness.frontier` | `docs/FRONTIER.md` |
@@ -168,12 +168,14 @@ layer, what it puts on the wire, and how that is enforced:
 | tau's own providers (pinned, not edited) | protocol knobs: Anthropic `cache_control` breakpoints, `max_tokens` (4096 if not declared); Codex `text.verbosity: "low"`, `include: ["reasoning.encrypted_content"]`, `tool_choice: "auto"`, `parallel_tool_calls: true`, and **`instructions: "You are a helpful assistant."` when the system prompt is empty** (preflight and rescue only); Gemini nothing beyond the declared caps | system text of their own on agent calls | same test (the Codex fallback is the only text allowed on a bare call) |
 | claude proxy | the subscription bearer; `anthropic-beta: oauth-2025-04-20`; body byte for byte | `claude-code-*` betas, Claude Code's system prompt or tools | `tests/test_proxies.py` (only `authorization` and `anthropic-beta` differ); extra betas only via `CLAUDE_PROXY_EXTRA_BETAS`, declared at `/health` |
 | codex proxy | the subscription bearer, `chatgpt-account-id`; `stream: true`, `store: false` (the backend serves nothing else) | Codex's instructions, tools or `originator` | `tests/test_proxies.py` (a tau request crosses unchanged) |
-| antigravity proxy | the subscription bearer, `User-Agent: mathai-harness-proxy`; envelope `{model, project, request}` with `request` the client's body unchanged | `requestType: "agent"`, `userAgent`, Antigravity's system instruction or tools | `tests/test_proxies.py`; extras only via `ANTIGRAVITY_ENVELOPE_EXTRA` / `ANTIGRAVITY_USER_AGENT`, declared at `/health` |
+| antigravity proxy | the subscription bearer, `User-Agent: mathai-harness-proxy` (the owner's runs declare the `agy` client instead, see below); envelope `{model, project, request}` with `request` the client's body unchanged | `requestType: "agent"`, `userAgent`, Antigravity's system instruction or tools | `tests/test_proxies.py`; extras only via `ANTIGRAVITY_ENVELOPE_EXTRA` / `ANTIGRAVITY_USER_AGENT`, declared at `/health` |
 | whole chain | — | any of the above | `frontier e2e`: the fake vendor upstreams answer 401 to any call whose system text is not the agent's own (or empty), whose tools are not the mechanism's, that carries a `claude-code` beta or an envelope field beyond `{model, project, request}`; negative controls (re-enabling the Claude Code beta or the agent envelope) make the e2e fail |
 
 Every proxy declares at `/health` (`adds`) exactly what it changes; `frontier` records
 those declarations in `proxies/proxies.json` and in `export/freeze.json`
 (`proxy_declarations`), so the dataset cites what reached the model.
+
+Measured on the owner's subscriptions (§9), two exceptions are declared: the Claude identity sentence below, and the `agy` User-Agent on the Antigravity proxy (a header, not prompt or envelope content).
 
 The one exception that may be needed is measured, not assumed: some Claude
 subscription tokens are only served to Claude Code and refuse a call without the
@@ -199,11 +201,7 @@ proxy log digests).
 
 ## 9. Not verified, and open for the owner
 
-- **Nothing here has run against a live subscription.** The proxies, the runner and
-  the orchestrator are tested offline (contract tests, stub servers, an end-to-end run
-  against fake vendor upstreams). `frontier probe` is the gate.
-- Whether the Antigravity backend serves `gemini-3.8-flash` under that id (else
-  `proxies.antigravity.model_map`), on which host, and with which envelope fields.
+- **Measured on the owner's subscriptions (2026-10-08).** The Claude subscription refuses the pure call (HTTP 429) and serves the model with the identity sentence: `families.anthropic.oauth_identity = true` (owner decision F-8). The Antigravity backend (`cloudcode-pa`) finds the owner's project only for a client that identifies as `agy` (`ANTIGRAVITY_USER_AGENT=antigravity/1.2.10 darwin/arm64`, owner decision G2; envelope still `{model, project, request}`), and serves Gemini 3.8 Flash as `gemini-3.8-flash-tiered` (`proxies.antigravity.model_map`). Both are declared at `/health` and recorded in `freeze.json`.
 - Sampling `provider-default` for all three families (§3), effort `high` for all three,
-  output caps, turn cap 30 and deadline 1800 s: declared defaults, owner decisions.
+  output caps (none beyond each model's maximum since round 2), turn cap 32 and deadline 3600 s: declared, owner decisions.
 - Terms of service of each subscription for automated use: the owner's call.
