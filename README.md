@@ -130,6 +130,37 @@ tau-intent bench --server ws://127.0.0.1:3000/ws --pin <PIN> \
 - The agent's `bash` tool now runs on the **orchestrator's** machine: run it in a disposable user,
   VM or container.
 
+### Frontier strand — native protocols through subscription proxies
+
+The same cell over a vendor's **native** protocol, for the frontier strand of the TG
+(contract: [`docs/BENCH-FRONTIER.md`](docs/BENCH-FRONTIER.md); the proxies and the orchestrator
+live in `mathai-harness`, `python -m mathai_harness.frontier`). tau's own provider is used for
+each protocol (`AnthropicProvider`, `OpenAICodexProvider`, `GoogleGenerativeAIProvider`); nothing of
+tau is edited. Offline only.
+
+```bash
+tau-intent bench --offline --arms A,B,C --seed 7 \
+  --provider-api anthropic-messages --provider-url http://127.0.0.1:8801 \
+  --model claude-opus-5-5 --sampling provider-default --reasoning-effort high \
+  --model-family anthropic --strand frontier --infra-retries 8 \
+  --taskset <path-to>/mathai-harness/taskset-harbour --out ./frontier-out
+```
+
+- `--sampling` is **required** for a native protocol: `provider-default` sends no sampling field and the
+  wire log proves none left (several frontier models reject `temperature` with a 400); `stamped` writes
+  temperature 0 and the seed where the protocol has fields (Gemini: `generationConfig`).
+- A unit lost to infrastructure (429, 401/403, 5xx from the proxy; the proxy gone) is discarded and run
+  again from the state before it (`--infra-retries`); the record lists every discarded attempt with its
+  tokens. The local strand keeps V0.2's rule (never retried): `--infra-retries` is refused there.
+- No vendor harness reaches the model: the call carries the agent's prompt, the mechanism's tools and
+  the task (checked on every request of a cell, `TestNoHarnessOnTheWire`). `--anthropic-oauth-identity`
+  prepends the one Claude Code identity sentence some subscriptions require; off by default, declared
+  only after `frontier probe` measured a refusal.
+- A task set may declare a frozen host suite (`"regression"`): it runs after every unit as
+  `host_regression`, descriptive, never part of `oracle.pass`.
+- Gemini's `usageMetadata`, which tau 0.4.7's parser drops, is read off the response bytes
+  (`provider_api.UsageFromWire`); outcome tokens stay the provider's own.
+
 ## v1 scope
 
 See [`docs/SPEC-V1.md`](docs/SPEC-V1.md) and [`AGENTS.md`](AGENTS.md). v1 slices 1–5 are on main. v1.1 is the structural gate, `files: []`, H16, and the block contract. No orchestrator adapter. No V5 labelled set in this repo (`conferir_v4_v5` only refuses a V4 report without it). No live model in CI.

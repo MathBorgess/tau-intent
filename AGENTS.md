@@ -12,6 +12,7 @@ Read `docs/SPEC-V1.md` before touching code. Stop there. The vault is not requir
 6. **Anchors come from git diff.** Tool events attach why/property/symbol/domain. The write/edit argument is `path`, not `file_path`. `bash` also writes files. `record_intent` may span files via `files: [...]` and several AST symbols in the same file. Declared `symbol` scopes the call; omit it to cover every hunk. Flush writes `Region.symbol`.
 7. **Arm A must not write intents.jsonl.** Abort if it does.
 8. **Temperature 0 is set by the owner on the provider they expose.** If you use tau's built-in provider, stamp the HTTP body and test the body. Do not trust a config object. Do not invent `seed` unless the wire carries it.
+   Frontier strand (`docs/BENCH-FRONTIER.md` §3): `--sampling provider-default` is a declared policy, checked on the wire like a stamp (no sampling knob may leave). Do not stamp a field a model refuses, and do not drop the check.
 9. **Copy read/write/edit/bash with origin SHA in the docstring (MIT).** Their descriptions are experimental fixtures.
 10. **Tests of v1: no API key, no live HTTP to a model.** Fake provider or recorded fixtures.
 11. **Do not cite EXPERIMENTO.md or SPEC.md.** Those files must not exist here.

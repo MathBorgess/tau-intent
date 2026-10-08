@@ -71,6 +71,11 @@ class TaskSet:
     qualification: Qualification | None
     sha: str
     extra: dict = field(default_factory=dict)
+    #: Optional frozen copy of the host repository's own suite (``"regression"`` in
+    #: taskset.json): run after every unit as a *descriptive* layer, never part of the
+    #: task's oracle, so a task set that only grows the repository around the same chain
+    #: keeps the same ``task_hash`` per task.
+    regression: Path | None = None
 
     def task(self, index: int) -> Task:
         for task in self.tasks:
@@ -185,8 +190,14 @@ def load_taskset(path: str | Path) -> TaskSet:
         qualification = Qualification(
             id=QUALIFICATION_ID, seed=_dir(root, q.get("seed", ""), "qualification seed"),
             statement=q_statement, tests=q_tests, hash=hash_task(q_statement, q_tests))
+    regression = None
+    r = manifest.get("regression")
+    if r:
+        if not isinstance(r, dict) or not isinstance(r.get("tests"), str):
+            raise TasksetError('regression must be {"tests": "<dir>"}')
+        regression = _dir(root, r["tests"], "regression tests")
     return TaskSet(
         root=root, id=str(_need(manifest, "id")), version=str(manifest.get("version", "")),
         language="python", python=python, seed=_dir(root, _need(manifest, "seed"), "seed"),
         test_runner=tuple(runner), tasks=tuple(tasks), qualification=qualification,
-        sha=hash_taskset(root))
+        sha=hash_taskset(root), regression=regression)

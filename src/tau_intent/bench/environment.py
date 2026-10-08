@@ -302,6 +302,59 @@ def preflight_endpoint(provider_url: str, model: str, seed: int, *, timeout_s: f
     return out
 
 
+def preflight_native(spec: Any, *, timeout_s: float = 120.0) -> dict[str, Any]:
+    """The frontier strand's preflight: one tiny request through tau's own provider for
+    the cell's protocol, on the same stamping transport the agent will use.
+
+    Same report as ``preflight_endpoint`` plus what a native protocol adds: the HTTP
+    status (a 400 here usually means the model refuses a sampling field, which is a
+    sampling-policy decision, not something to patch around), whether the sampling
+    the cell declared really left as declared, and the model the provider said answered.
+    """
+    import asyncio
+    from dataclasses import replace
+
+    from tau_intent.harness_factory import build_provider, stamped_client
+
+    probe = replace(spec, timeout_s=timeout_s)
+    out: dict[str, Any] = {"reachable": False, "usage_in_stream": False, "error": None, "status": None,
+                           "api": spec.api, "sampling_ok": None, "answered_by": None}
+
+    async def once() -> None:
+        from tau_agent.messages import TextContent, UserMessage
+        from tau_ai.events import AssistantDoneEvent, AssistantErrorEvent
+
+        client, wire = stamped_client(probe)
+        try:
+            provider = build_provider(probe, client, wire, max_retries=0, max_output_tokens=1024)
+            final = None
+            async for event in provider.stream_response(
+                    model=spec.model, system="", tools=[],
+                    messages=[UserMessage(content=[TextContent(text="Reply with the word ok.")])]):
+                if isinstance(event, AssistantDoneEvent):
+                    final = event.message
+                elif isinstance(event, AssistantErrorEvent):
+                    out["error"] = str(event.error.error_message or event.reason)[:300]
+            out["status"] = wire.statuses[-1] if wire.statuses else None
+            out["reachable"] = bool(wire.statuses) and not wire.network_errors
+            out["sampling_ok"] = wire.report()["conferida_no_fio"]
+            if wire.network_errors:
+                last = wire.network_errors[-1]
+                out["error"] = f"{last['type']}: {last['detail']}"[:300]
+            if final is not None:
+                u = final.usage
+                out["usage_in_stream"] = bool(u.input or u.output or u.cache_read or u.cache_write)
+                out["answered_by"] = final.response_model or final.model
+        finally:
+            await client.aclose()
+
+    try:
+        asyncio.run(once())
+    except Exception as exc:  # noqa: BLE001 - reported, the cell decides
+        out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+    return out
+
+
 def check_pin() -> tuple[bool, str]:
     """The pinned tau must be the installed one, byte for byte (RECORD)."""
     import contextlib

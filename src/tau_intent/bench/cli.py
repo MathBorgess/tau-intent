@@ -14,6 +14,14 @@ participant backend, and calls the participant's Ollama over the LAN:
       --provider-url http://<lan-ip>:11434/v1 --model <model-id> --runner-kind ollama \\
       --hardware-source declared [--chip ... --ram-gb ... --accel ...] \\
       --taskset <path> --out <dir-of-this-backend>
+
+Frontier strand (offline only): the same cell over a vendor's native protocol, through
+a local subscription proxy (mathai-harness ``frontier`` runs these for you):
+
+  tau-intent bench --offline --arms A,B,C --seed 7 \\
+      --provider-api anthropic-messages --provider-url http://127.0.0.1:8801 \\
+      --model claude-opus-5-5 --sampling provider-default --reasoning-effort high \\
+      --infra-retries 8 --taskset <path>/taskset-large --out <dir>
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from tau_intent import provider_api as api_mod
 from tau_intent.bench import environment
 from tau_intent.bench.cell import CellError, CellSettings, validate_assign
 from tau_intent.bench.client import OnlineConfig, run_offline, run_online
@@ -63,6 +72,29 @@ def build_parser() -> argparse.ArgumentParser:
                             "--chip/--ram-gb/--accel are the participant's own declaration (null allowed)")
     model.add_argument("--backend-id", help="id of the participant backend served by this process "
                                             "(stored as backend.backend_id)")
+    frontier = parser.add_argument_group("frontier strand (native protocols through a local proxy)")
+    frontier.add_argument("--provider-api", choices=api_mod.PROVIDER_APIS, default=api_mod.OPENAI_COMPLETIONS,
+                          help="wire protocol of --provider-url (default: openai-completions, the local strand)")
+    frontier.add_argument("--sampling", choices=api_mod.SAMPLING_POLICIES,
+                          help="stamped: temperature 0 and the seed written in every body where the protocol "
+                               "has a field; provider-default: none sent, and the wire log checks it. Default "
+                               "stamped for openai-completions; required for any other protocol")
+    frontier.add_argument("--reasoning-effort",
+                          help="provider-native depth (Anthropic output_config.effort, Codex reasoning.effort, "
+                               "Gemini thinkingConfig); default: the provider's own")
+    frontier.add_argument("--max-output-tokens", type=int, help="per-response cap; default: tau's for the protocol")
+    frontier.add_argument("--anthropic-oauth-identity", action="store_true",
+                          help="anthropic-messages only: prepend the Claude Code identity sentence some subscription "
+                               "tokens require (off by default: the model sees the agent's prompt and nothing else)")
+    frontier.add_argument("--model-family", help="label stored as model.family (e.g. anthropic, openai, google)")
+    frontier.add_argument("--strand", help="label stored in cell.json (e.g. frontier)")
+    frontier.add_argument("--infra-retries", type=int, default=0,
+                          help="native protocols only: a unit lost to infrastructure (quota, credentials, "
+                               "provider or proxy down) is discarded and run again from the state before it, "
+                               "up to N times (default 0 = never, V0.2's rule)")
+    frontier.add_argument("--infra-wait-s", type=float, default=60.0,
+                          help="wait before infra retry n: min(wait * 2**(n-1), --infra-max-wait-s)")
+    frontier.add_argument("--infra-max-wait-s", type=float, default=3600.0)
     work = parser.add_argument_group("work")
     work.add_argument("--taskset", required=True, type=Path, help="path to the tg-taskset-1 directory")
     work.add_argument("--out", required=True, type=Path, help="where the cell's data is kept")
@@ -96,6 +128,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     def log(message: str) -> None:
         print(message, flush=True)
 
+    native = args.provider_api != api_mod.OPENAI_COMPLETIONS
+    if native and args.sampling is None:
+        parser.error("a native-protocol cell must declare --sampling (stamped | provider-default): "
+                     "several frontier models refuse sampling fields, and the choice is the owner's")
+    sampling = args.sampling or api_mod.SAMPLING_STAMPED
+    if native and not args.offline:
+        parser.error("--provider-api other than openai-completions runs offline only (--offline): "
+                     "the arena's schemas know local runners")
+    if native and args.runner_kind not in (None, "other"):
+        parser.error("a native-protocol cell is not a local runner: drop --runner-kind")
+    if args.anthropic_oauth_identity and args.provider_api != api_mod.ANTHROPIC_MESSAGES:
+        parser.error("--anthropic-oauth-identity is for --provider-api anthropic-messages")
+    if args.infra_retries and not native:
+        parser.error("--infra-retries is for native-protocol cells; the local strand never retries (V0.2)")
+
     if not args.skip_pin_check:
         ok, text = environment.check_pin()
         if not ok:
@@ -109,7 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         log(f"cannot use the task set: {exc}")
         return 2
 
-    kind = args.runner_kind or environment.guess_runner_kind(args.provider_url)
+    kind = "other" if native else (args.runner_kind or environment.guess_runner_kind(args.provider_url))
     join = {
         "participant_id": args.participant_id or "offline",
         "runner_version": environment.runner_version(),
@@ -117,7 +164,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "task_set_sha": taskset.sha,
         "model": {"id": args.model,
                   "digest": args.digest or environment.model_digest(args.provider_url, args.model, kind),
-                  "runner_kind": kind},
+                  "runner_kind": kind,
+                  **({"family": args.model_family} if args.model_family else {})},
         "hardware": (environment.hardware_declared(chip=args.chip, ram_gb=args.ram_gb, accel=args.accel)
                      if args.hardware_source == "declared"
                      else environment.hardware(chip=args.chip, ram_gb=args.ram_gb, accel=args.accel)),
@@ -128,10 +176,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         pin_hash=hashlib.sha256(args.pin.encode()).hexdigest() if args.pin else None,
         api_key=args.api_key, oracle_timeout_s=args.oracle_timeout_s, rescue_timeout_s=args.rescue_timeout_s,
         keep_workspaces=args.keep_workspaces, skip_preflight=args.skip_preflight,
-        backend_id=args.backend_id)
+        backend_id=args.backend_id,
+        provider_api=args.provider_api, sampling=sampling, reasoning_effort=args.reasoning_effort,
+        max_output_tokens=args.max_output_tokens, infra_retries=max(0, args.infra_retries),
+        infra_wait_s=args.infra_wait_s, infra_max_wait_s=args.infra_max_wait_s, strand=args.strand,
+        anthropic_oauth_identity=args.anthropic_oauth_identity)
     args.out.mkdir(parents=True, exist_ok=True)
     log(f"task set {taskset.id} {taskset.version} sha {taskset.sha[:12]} ({len(taskset.tasks)} tasks); "
-        f"model {args.model} via {kind} at {environment.redact_host(args.provider_url, args.provider_url)}")
+        f"model {args.model} via {args.provider_api if native else kind} at "
+        f"{environment.redact_host(args.provider_url, args.provider_url)}"
+        + (f" (sampling {sampling}, effort {args.reasoning_effort or 'provider default'})" if native else ""))
 
     if args.offline:
         arms = [a.strip() for a in args.arms.split(",") if a.strip()]

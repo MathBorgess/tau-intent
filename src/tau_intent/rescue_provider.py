@@ -2,7 +2,9 @@
 
 Kept apart from ``rescue.py`` on purpose: that module is the declared, hashed
 policy and has a test that it contains no network code. This one is the
-transport. Standard library only (no runtime dependency).
+transport. The local strand's path is standard library only (no runtime
+dependency); a frontier cell's rescue goes through tau's own provider for the
+cell's native protocol (``provedor_nativo``), on the same stamping wire log.
 """
 
 from __future__ import annotations
@@ -58,6 +60,79 @@ def provedor_openai_compat(
         return {"text": texto, "usage": data.get("usage")}
 
     return chamar
+
+
+def provedor_nativo(spec: Any, *, timeout_s: float, wire: Any = None) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """The rescue's provider for a frontier cell: the cell's own model, its own protocol.
+
+    The body ``montar_corpo_da_requisicao`` built is OpenAI-shaped; only its parts
+    that mean something on every protocol cross over: the user message and
+    ``max_tokens``. Sampling is the cell's policy, applied by the same stamping
+    transport as the agent's calls (so ``provider-default`` sends none, and the
+    wire log proves it). The answer comes back in the shape ``uso_de_resposta``
+    reads: ``{"text", "usage": {"prompt_tokens", "completion_tokens"}}``.
+
+    ``projetar`` calls the summariser synchronously from inside the agent's event
+    loop, so each call runs tau's async provider on a short-lived loop in a worker
+    thread.
+    """
+    import asyncio
+    import concurrent.futures
+    from dataclasses import replace
+
+    rescue_spec = replace(spec, timeout_s=timeout_s)
+
+    async def once(body: dict[str, Any]) -> dict[str, Any]:
+        from tau_agent.messages import TextContent, UserMessage
+        from tau_ai.events import AssistantDoneEvent, AssistantErrorEvent
+
+        from tau_intent.harness_factory import build_provider, stamped_client
+
+        client, log = stamped_client(rescue_spec, wire)
+        try:
+            provider = build_provider(rescue_spec, client, log, max_retries=0,
+                                      max_output_tokens=body.get("max_tokens"))
+            content = "\n\n".join(str(m.get("content") or "") for m in body.get("messages", [])
+                                   if isinstance(m, dict) and m.get("role") == "user")
+            final = None
+            async for event in provider.stream_response(
+                    model=spec.model, system="", tools=[],
+                    messages=[UserMessage(content=[TextContent(text=content)])]):
+                if isinstance(event, AssistantDoneEvent):
+                    final = event.message
+                elif isinstance(event, AssistantErrorEvent):
+                    raise RuntimeError(f"rescue provider: {event.error.error_message or event.reason}"[:300])
+        finally:
+            await client.aclose()
+        if final is None:
+            raise RuntimeError("rescue provider: the stream ended without a final message")
+        texto = "".join(block.text for block in final.content if isinstance(block, TextContent))
+        u = final.usage
+        uso = {"prompt_tokens": int(u.input) + int(u.cache_read) + int(u.cache_write),
+               "completion_tokens": int(u.output)}
+        return {"text": texto, "usage": uso}
+
+    def chamar(body: dict[str, Any]) -> dict[str, Any]:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(lambda: asyncio.run(once(body)))
+        try:
+            return future.result(timeout=timeout_s + 5)
+        except concurrent.futures.TimeoutError as exc:
+            raise RuntimeError(f"rescue provider timed out after {timeout_s}s") from exc
+        finally:
+            pool.shutdown(wait=False)  # a hung call is abandoned, never waited on
+
+    return chamar
+
+
+def sumarizador_nativo(spec: Any, *, cfg: RescueConfig | None = None, timeout_s: float | None = None,
+                       wire: Any = None) -> Sumarizador:
+    """Arm C's summariser for a frontier cell (same rule as ``sumarizador_local``: D-2)."""
+    from dataclasses import replace
+
+    base = cfg or load_rescue_config()
+    cfg = replace(base, modelo_id=spec.model, habilitado=True)
+    return Sumarizador(cfg, provedor_nativo(spec, timeout_s=timeout_s or cfg.timeout_s, wire=wire))
 
 
 def sumarizador_local(

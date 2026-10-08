@@ -98,14 +98,31 @@ def run_oracle(taskset: TaskSet, k: int, workspace: Path, *, python: str | None 
     workspace = Path(os.path.abspath(workspace))
     if not workspace.is_dir():
         raise OracleError(f"workspace is not a directory: {workspace}")
-    runner = list(taskset.test_runner)
-    if runner and runner[0] == "python":
-        runner[0] = python or sys.executable
     try:
         pairs = oracle_dirs(taskset, k)
     except TasksetError as exc:
         raise OracleError(str(exc)) from exc
+    return _run_tests(taskset, pairs, workspace, python=python, timeout_s=timeout_s)
 
+
+def run_regression(taskset: TaskSet, workspace: Path, *, python: str | None = None,
+                   timeout_s: int = DEFAULT_TIMEOUT_S) -> dict[str, Any] | None:
+    """The host repository's frozen suite against the workspace, or ``None`` if the
+    task set declares none. Same isolation as the oracle (copied out, never the
+    agent's own copy of the tests); descriptive, never part of ``oracle.pass``."""
+    if taskset.regression is None:
+        return None
+    workspace = Path(os.path.abspath(workspace))
+    if not workspace.is_dir():
+        raise OracleError(f"workspace is not a directory: {workspace}")
+    return _run_tests(taskset, [("host", taskset.regression)], workspace, python=python, timeout_s=timeout_s)
+
+
+def _run_tests(taskset: TaskSet, pairs: list[tuple[str, Path]], workspace: Path, *,
+               python: str | None, timeout_s: int) -> dict[str, Any]:
+    runner = list(taskset.test_runner)
+    if runner and runner[0] == "python":
+        runner[0] = python or sys.executable
     tmp = Path(tempfile.mkdtemp(prefix="oracle-"))
     try:
         if os.path.commonpath([str(tmp), str(workspace)]) == str(workspace):
