@@ -122,6 +122,7 @@ def projetar(
     and never leaves this module.
     """
     budget = cfg.token_budget if orcamento_token is None else orcamento_token
+    entries, colapsadas = _colapsar_duplicadas(entries)
     hubs = marcar_onipresentes(graph, cfg.lambda_grau) if cfg.prune_hubs else set()
     alcancados, nao_expandidos = expandir_com_recibo(
         graph, ancoras, cfg.edge_types, cfg.up_depth, cfg.down_depth, cfg.max_nodes, hubs
@@ -182,6 +183,7 @@ def projetar(
         "n_escolhidas": len(escolhidas),
         "n_cortadas": len(cortadas),
         "n_alcancados": len(alcancados),
+        "duplicadas_colapsadas": colapsadas,
         "recibo": recibo.as_dict(),
         "bloco_suprimido_por_orcamento": suprimido,
         "llm_rescue": False,
@@ -394,6 +396,27 @@ def expandir(
         graph, ancoras, edge_types, up_depth, down_depth, max_nodes, hubs
     )
     return alcancados
+
+
+def _colapsar_duplicadas(entries: Sequence[Any]) -> tuple[list[Any], int]:
+    """One entry per (node, why, property, domain): the newest one.
+
+    One record_intent over N hunks of a symbol used to become N entries with
+    the same text, and the block served every copy while the budget cut other
+    entries (frontier review T8). Identical content adds nothing to the view;
+    the count of collapsed copies goes to the telemetry, not to the receipt,
+    whose contract (P-1) names only selection omissions.
+    """
+    escolhidas: dict[tuple[str, str, str, str], tuple[str, int, Any]] = {}
+    for ordem, entry in enumerate(entries):
+        chave = (_node_id(entry), str(getattr(entry, "why", "") or ""),
+                 str(getattr(entry, "property", "") or ""), str(getattr(entry, "domain", "") or ""))
+        ts = str(getattr(entry, "ts", "") or "")
+        atual = escolhidas.get(chave)
+        if atual is None or (ts, ordem) >= (atual[0], atual[1]):
+            escolhidas[chave] = (ts, ordem, entry)
+    unicas = [item[2] for item in sorted(escolhidas.values(), key=lambda item: item[1])]
+    return unicas, len(entries) - len(unicas)
 
 
 def _node_id(entry: Any) -> str:

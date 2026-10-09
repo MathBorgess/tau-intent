@@ -115,7 +115,8 @@ class TestUsageThroughTheRealLoop(unittest.TestCase):
         stub, result = self.run_it("B", script)
         self.assertEqual([r["kind"] for r in result.telemetry["turnos"]],
                          ["productive", "productive", "block", "block"])
-        self.assertEqual(result.block_turns, 1)
+        self.assertEqual(result.block_turns, 2)  # P2 counts turns (review T6b)
+        self.assertEqual(result.bloqueios, 1)
 
     def test_a_call_cut_by_the_deadline_marks_the_sums_as_a_lower_bound(self):
         from tau_intent.harness_factory import ProviderSpec  # noqa: F401

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -73,6 +73,9 @@ class Flags:
 class RunResult:
     flags: Flags
     productive_turns: int
+    #: P2 of the pre-registration: model turns spent answering a gate block
+    #: (every turn between a ``BLOQUEIA`` and the next gate run). ``bloqueios``
+    #: counts the verdicts themselves.
     block_turns: int
     verdict: str
     follow_ups: list[str]
@@ -80,6 +83,7 @@ class RunResult:
     telemetry: dict[str, Any]
     bloco: str = ""
     manifest: dict[str, Any] = field(default_factory=dict)
+    bloqueios: int = 0
 
 
 
@@ -373,7 +377,16 @@ async def run_task(
             raise ValueError("checkpoint targets differ from independently observed effects")
     publicar = flags.capture and (not flags.gate or (tel["gate_avaliado"] and verdict == "PASSA"))
     tel["captura_publicada"] = publicar
+    # Regions the agent touched and that were not published. This is not a
+    # count of intents: a region nobody annotated is in it too (review T3).
     tel["pendencias_nao_publicadas"] = len(pendentes) if flags.capture and not publicar else 0
+    a_gravar = _entradas_a_gravar(pendentes) if flags.capture else []
+    tel["intencoes_nao_publicadas"] = len(a_gravar) if flags.capture and not publicar else 0
+    tel["regioes_sem_intencao"] = sum(
+        1 for p in pendentes.values()
+        if isinstance(p, Pending) and not p.unparseable and not (p.why or p.property))
+    tel["chamadas_record_intent"] = sum(
+        1 for e in collected_events if _is_tool_start(e) and _tool_name(e) == "record_intent")
     if publicar and store is not None:
         _flush_pendentes(store, pendentes, task_id, workspace, adapter, checkpoint)
     elif not flags.capture:
@@ -401,7 +414,8 @@ async def run_task(
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["productive_turns"] = productive
-    tel["block_turns"] = blocks
+    tel["block_turns"] = sum(1 for turno in turnos if turno["kind"] == "block")
+    tel["bloqueios"] = blocks
     tel["max_turns_on_tau"] = None
     amostragem = _amostragem_no_fio(harness)
     tel["amostragem"] = amostragem
@@ -419,7 +433,8 @@ async def run_task(
     return RunResult(
         flags=flags,
         productive_turns=productive,
-        block_turns=blocks,
+        block_turns=tel["block_turns"],
+        bloqueios=blocks,
         verdict=verdict,
         follow_ups=follow_ups,
         intents_path=intents_path,
@@ -490,17 +505,55 @@ def _projetar_visao_derivada(
     return bloco, tel
 
 
+def _entradas_a_gravar(pendentes: dict) -> list[Pending]:
+    """The entries a publication writes: one per decision, not one per hunk.
+
+    Hunks of one AST symbol that carry the same why/property/domain are one
+    decision and become one entry spanning them (review T8); before, one call
+    over N hunks wrote N identical entries and the block served every copy.
+    A region without a symbol has no identity to merge on and stays as it is,
+    so a file-level span never grows over unrelated lines.
+    """
+    grupos: dict[tuple, list[Pending]] = {}
+    soltas: list[Pending] = []
+    for pending in pendentes.values():
+        if not isinstance(pending, Pending) or pending.unparseable:
+            continue
+        if not pending.why and not pending.property:
+            continue
+        region = pending.region
+        if isinstance(region, Region) and region.symbol:
+            chave = (region.path, region.symbol, pending.why, pending.property, pending.domain)
+            grupos.setdefault(chave, []).append(pending)
+        else:
+            soltas.append(pending)
+    unidas: list[Pending] = []
+    for grupo in grupos.values():
+        if len(grupo) == 1:
+            unidas.append(grupo[0])
+            continue
+        primeira = grupo[0]
+        regioes = [p.region for p in grupo]
+        editadas = [r.edited_lines for r in regioes]
+        span = replace(
+            primeira.region,
+            line_start=min(r.line_start for r in regioes),
+            line_end=max(r.line_end for r in regioes),
+            size=0,
+            edited_lines=None if any(e is None for e in editadas) else sum(editadas),
+        )
+        span.size = max(span.line_end - span.line_start + 1, 0)
+        unidas.append(replace(primeira, region=span,
+                              trigger_log=[n for p in grupo for n in p.trigger_log],
+                              claimed_regions=len(grupo)))
+    return unidas + soltas
+
+
 def _flush_pendentes(store: Any, pendentes: dict, task_id: str, workspace: Path,
                      adapter: Adapter | None = None, checkpoint: Any = None) -> None:
     adapter = adapter or get_adapter("code")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for pending in pendentes.values():
-        if not isinstance(pending, Pending):
-            continue
-        if pending.unparseable:
-            continue
-        if not pending.why and not pending.property:
-            continue
+    for pending in _entradas_a_gravar(pendentes):
         store.append(
             IntentEntry(
                 id=str(uuid4()),
@@ -564,6 +617,11 @@ def _is_turn_end(event: Any) -> bool:
 def _is_tool_start(event: Any) -> bool:
     kind = getattr(event, "type", None) or type(event).__name__
     return kind in {"tool_execution_start", "ToolExecutionStartEvent"}
+
+
+def _tool_name(event: Any) -> str:
+    return str(getattr(event, "tool_name", None) or getattr(event, "toolName", None)
+               or (event.get("tool_name") if isinstance(event, dict) else "") or "")
 
 
 def _tool_results(event: Any) -> list[Any]:

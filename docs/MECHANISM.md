@@ -53,3 +53,16 @@ effect witness at all, the mode is `NAO_AVALIAVEL`: no fabricated capture or ora
 The main algorithm fits this page. Compatibility aliases and trusted checkpoint
 plumbing are the remaining complexity; neither should become a second mechanism.
 For executable entry points and limitations, see [the delta](DELTA-V1.1-V2.md).
+
+## Measurement fixes from the frontier review (2026-10-09)
+
+The review of the four counted frontier runs found five places where a number or a
+message did not mean what the design says. They change no promise of the mechanism.
+
+| Id | What changed | Field or behaviour |
+|---|---|---|
+| T3 | `pendencias_nao_publicadas` counts touched **regions** (with or without an intent). Two counts sit beside it | `intencoes_nao_publicadas` (entries a publication would have written), `regioes_sem_intencao`, `chamadas_record_intent` |
+| T4 | A gate block names `file::symbol` and the lines, once per identity, instead of the file once per hunk | `render_falhas` |
+| T6b | `block_turns` is P2 of the pre-registration: every model turn between a `BLOQUEIA` and the next gate run. The verdicts are counted apart | `block_turns` (turns), `bloqueios` (verdicts). Records before this change carry verdicts in `block_turns` |
+| T8 | Hunks of one symbol with the same why/property/domain are one decision and one entry; the projection collapses identical entries that older stores still hold | `_entradas_a_gravar`; telemetry `duplicadas_colapsadas` |
+| T9 | A served entry with a symbol counts as reused only if that symbol changed; a file-level entry still matches by file | `aproveitamento_do_bloco.criterio = "simbolo"` |
