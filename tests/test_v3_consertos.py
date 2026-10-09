@@ -102,15 +102,15 @@ class TestT4GateMessageNamesTheSymbol(unittest.TestCase):
         msg = render_falhas([Falha("EDICAO_GRANDE_SEM_SIMBOLO", a, "70 edited_lines"),
                              Falha("EDICAO_GRANDE_SEM_SIMBOLO", b, "70 edited_lines"),
                              Falha("AUSENTE", c)])
-        lines = msg.splitlines()[1:]
+        lines = [line.split(". ", 1)[0] for line in msg.splitlines()[1:]]
         self.assertEqual(lines, [
-            "- EDICAO_GRANDE_SEM_SIMBOLO: pkg/engine.py::Parser (linhas 10-90; 70 edited_lines)",
-            "- AUSENTE: pkg/engine.py::run (linhas 100-120)",
+            "- EDICAO_GRANDE_SEM_SIMBOLO: pkg/engine.py::Parser (lines 10-90; 70 edited_lines)",
+            "- AUSENTE: pkg/engine.py::run (lines 100-120)",
         ])
 
     def test_region_without_symbol_keeps_the_file_and_lines(self):
         msg = render_falhas([Falha("AUSENTE", Region("README.md", 1, 3))])
-        self.assertIn("- AUSENTE: README.md (linhas 1-3)", msg)
+        self.assertIn("- AUSENTE: README.md (lines 1-3).", msg)
 
 
 class TestT6bBlockTurnsAreTurns(unittest.TestCase):

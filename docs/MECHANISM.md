@@ -92,6 +92,20 @@ region when it is the region's dotted name or its last parts (`fit` covers
 each other at the gate. The code graph keeps bare node names; the projection and
 `recall_intent` map a dotted name to its graph node. Tests: `tests/test_v3_nome_exato.py`.
 
+**The agent acts on the list** (owner decision after pilot run 09c). Exact names were not
+enough: the agent read `AUSENTE: ...::Pipeline.predict` as a code problem and kept editing,
+33 block turns in one run. Three changes:
+
+- the block message (`prompts/portao-bloqueio-v1.txt`, hashed) is in the session's
+  language and each line says what clears it: `record_intent` with this file and this
+  symbol, or with the file alone for module-level lines and for files without names; the
+  header says that editing the code again clears nothing;
+- a declared symbol also covers the defs inside its def: `f` covers `f.wrapper`, and
+  `Pipeline` covers `Pipeline.predict`;
+- a declared symbol scopes a call file by file. A file with no observable names (Cython,
+  opaque, unparseable) is claimed whole by an intent that lists it; before, it was dropped
+  whenever another listed file had names. Tests: `tests/test_v3_agir_sobre_a_lista.py`.
+
 ## Arm B v2 (owner decisions of the arm-B grilling, 2026-10-09)
 
 Decided by the owner in the vault note `wiki/projects/harness-tau/2026-10-09-decisoes-grilling-braco-b`.

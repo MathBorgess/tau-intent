@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from tau_intent.config import BlocoConfig, load_bloco_config
+from tau_intent.collect import RESOLVER_V2
+from tau_intent.config import BlocoConfig, load_bloco_config, mensagem_do_portao
 
 
 @dataclass(frozen=True)
@@ -58,15 +59,18 @@ class Recibo:
 
 
 def render_falhas(falhas: Sequence[Any]) -> str:
-    """One line per (code, identity), naming ``file::symbol`` and the lines.
+    """One line per (code, identity), naming ``file::symbol``, the lines and what to do.
 
     The gate checks regions (hunks), but the agent fixes identities: a message
     that named only the file, once per hunk, left it guessing which def needed
-    a symbol — and it answered one guess per turn (frontier review T4).
+    a symbol — and it answered one guess per turn (frontier review T4). Naming
+    the def was not enough either: in pilot run 09c the agent read
+    ``AUSENTE: ...::Pipeline.predict`` as a code problem and kept editing. Each
+    line now says what clears it — a ``record_intent`` with this file and this
+    symbol — in the session's language (``prompts/portao-bloqueio-v1.txt``).
     """
-    lines = [
-        "O portão bloqueou o turno. Corrija as falhas abaixo e continue na mesma sessão."
-    ]
+    cabecalho, remedios, alvos = mensagem_do_portao()
+    lines = [cabecalho]
     grupos: dict[tuple[str, str], dict[str, Any]] = {}
     for falha in falhas:
         code = getattr(falha, "code", None) or (
@@ -74,19 +78,33 @@ def render_falhas(falhas: Sequence[Any]) -> str:
         )
         region = getattr(falha, "region", None)
         grupo = grupos.setdefault((code, _identidade(region)),
-                                  {"spans": [], "detail": getattr(falha, "detail", "")})
+                                  {"spans": [], "detail": getattr(falha, "detail", ""), "region": region})
         start, end = getattr(region, "line_start", None), getattr(region, "line_end", None)
         if start is not None and end is not None:
             grupo["spans"].append((int(start), int(end)))
     for (code, ident), grupo in grupos.items():
         partes = []
         if grupo["spans"]:
-            partes.append(f"linhas {min(s for s, _ in grupo['spans'])}-{max(e for _, e in grupo['spans'])}")
+            partes.append(f"lines {min(s for s, _ in grupo['spans'])}-{max(e for _, e in grupo['spans'])}")
         if grupo["detail"]:
             partes.append(str(grupo["detail"]))
         extra = f" ({'; '.join(partes)})" if partes else ""
-        lines.append(f"- {code}: {ident}{extra}")
+        remedio = remedios.get(code, "")
+        if remedio:
+            remedio = " " + remedio.format(alvo=_alvo(grupo["region"], alvos))
+        lines.append(f"- {code}: {ident}{extra}.{remedio}")
     return "\n".join(lines)
+
+
+def _alvo(region: Any, alvos: dict[str, str]) -> str:
+    """The record_intent target that clears a line: file and symbol, or the file alone."""
+    path = str(getattr(region, "path", None) or getattr(region, "file", None) or region)
+    symbol = getattr(region, "symbol", None)
+    if symbol:
+        return alvos["simbolo"].format(file=path, symbol=symbol)
+    if getattr(region, "resolver", None) == RESOLVER_V2:
+        return alvos["modulo"].format(file=path)
+    return alvos["arquivo"].format(file=path)
 
 
 def _identidade(region: Any) -> str:

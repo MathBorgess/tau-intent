@@ -197,7 +197,7 @@ class TestDeclaredSymbols(unittest.TestCase):
         self.assertTrue(simbolo_confere("fit", "QDA.fit"))
         self.assertTrue(simbolo_confere("m.py::QDA.fit", "QDA.fit"))
         self.assertFalse(simbolo_confere("fit", "QDA.partial_fit"))
-        self.assertFalse(simbolo_confere("QDA", "QDA.fit"))
+        self.assertTrue(simbolo_confere("QDA", "QDA.fit"))  # a def covers the defs inside it (run 09c)
         self.assertFalse(simbolo_confere("", "QDA.fit"))
 
     def test_the_gate_passes_when_each_def_has_its_intent(self):
@@ -216,8 +216,8 @@ class TestDeclaredSymbols(unittest.TestCase):
                                                          "new_function")])
             self.assertEqual(verdict.tipo, "BLOQUEIA")
             message = render_falhas(verdict.falhas)
-            self.assertIn("AUSENTE: m.py::LDA.transform (linhas 24-25)", message)
-            self.assertIn("AUSENTE: m.py (linhas 2-2)", message)
+            self.assertIn("AUSENTE: m.py::LDA.transform (lines 24-25).", message)
+            self.assertIn("AUSENTE: m.py (lines 2-2).", message)
             self.assertNotIn("m.py::LDA ", message)
             self.assertEqual(len(verdict.falhas), 2, message)
 
