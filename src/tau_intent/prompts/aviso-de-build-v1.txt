@@ -1,0 +1,3 @@
+Build check: before this session started, the bench ran the task's build check in your working tree, and it failed. The package does not build, so its tests cannot import it. Fix the build before anything else. The last lines of the check's output:
+
+{saida}

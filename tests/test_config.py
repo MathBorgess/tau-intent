@@ -184,8 +184,9 @@ class TestManifesto(unittest.TestCase):
         """Refactors and the bench slices must not touch the frozen config members.
 
         v3 (arm-B grilling, 2026-10-09) added members on purpose: supervisor.yaml,
-        bloco-consulta.yaml and two prompts. Every v2 member stays byte-identical,
-        and the full v3 list is pinned so a further member cannot slip in.
+        bloco-consulta.yaml and two prompts, then the broken-build notice after the
+        SWE-Milestone pilot. Every v2 member stays byte-identical, and the full v3
+        list is pinned so a further member cannot slip in.
         """
         import json
         from pathlib import Path
