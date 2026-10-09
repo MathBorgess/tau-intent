@@ -7,5 +7,6 @@
   "prompts/rescue-v1.txt": "22330bbeedbf105625b9d56b1d69b837e89da711ecfd54aef95e5377534c4152",
   "supervisor.yaml": "3ab6cc5bc4f8dedd305b72c52977ae2c5cefc802482061d6635cbce1c5fcbc9e",
   "prompts/aviso-de-fim-v1.txt": "73cd64adb96c53a6b11a3c8915e05196e45189417b3448dfa806953d01f725e4",
-  "prompts/consulta-v1.txt": "0e7811bb90eada18f3e7359cb23b8f3aa614ab5f4b7aade56fcdd62a308bae2f"
+  "prompts/consulta-v1.txt": "0e7811bb90eada18f3e7359cb23b8f3aa614ab5f4b7aade56fcdd62a308bae2f",
+  "prompts/aviso-de-build-v1.txt": "6ee8c7f156605d661080727e387f30a9acb41d1266859dda23bb18fb6897b383"
 }

@@ -140,6 +140,18 @@ environment (the SWE-Milestone scikit-learn chain):
 (`fora_do_relogio_s`). Each run is a line of `snapshots.jsonl`; the record gets
 `snapshot_oracle.turns_to_green`, the first turn at which the snapshot was green (Q6).
 
+**Build check** (owner decision after the SWE-Milestone pilot, 2026-10-09). Inside
+`environment`, `"build_check": "<script>"` (and `build_check_timeout_s`, default 900) names a
+script the bench runs with `bash` in the agent's tree, with the arm's interpreter first on
+PATH: exit 0 means the package builds. It runs before each session, after each editing turn
+(next to the snapshot) and at the end. A session that starts on a broken build gets the
+notice `prompts/aviso-de-build-v1.txt` after the task statement, with the check's last 30
+output lines; the text is the same in every arm. The record gets `build`: `inicio_ok`,
+`fim_ok`, `aviso_enviado`, `quebrou` (started working, ended broken), `recuperou` (started
+broken, ended working; `null` when it started working), `turno_quebra`, `turno_recuperacao`,
+`turnos_com_build_quebrada`; `build.json` keeps both outputs and each snapshot line its
+`build_ok`.
+
 ## 5. Infrastructure retries
 
 Subscriptions have windows (five-hour, weekly) and sessions expire; a long run will

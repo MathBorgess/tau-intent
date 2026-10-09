@@ -132,6 +132,42 @@ def run_regression(taskset: TaskSet, workspace: Path, *, python: str | None = No
     return _run_tests(taskset, [("host", taskset.regression)], workspace, python=python, timeout_s=timeout_s)
 
 
+def run_build_check(taskset: TaskSet, workspace: Path, *, python: str | None = None,
+                    home: Path | None = None) -> dict[str, Any] | None:
+    """The task set's build check in the agent's tree; ``None`` when it declares none.
+
+    It runs as the agent's shell would (the arm's interpreter directory first on PATH,
+    cwd = the working tree), so a broken build here is the one the agent would see. It
+    may rebuild into the tree's ignored build directory, exactly as the agent's own
+    ``import`` does; it never edits a tracked file.
+    """
+    spec = taskset.environment or {}
+    script = spec.get("build_check")
+    if not script:
+        return None
+    env = dict(os.environ)
+    if python is not None:
+        env_bin = os.path.dirname(os.path.abspath(python))
+        env["PATH"] = env_bin + os.pathsep + env.get("PATH", os.defpath)
+        env["VIRTUAL_ENV"] = os.path.dirname(env_bin)
+    if home is not None:
+        env["HOME"] = str(home)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["TASKSET_ROOT"] = str(taskset.root)
+    started = time.monotonic()
+    timed_out = False
+    try:
+        proc = subprocess.run(["bash", str(taskset.root / script)], cwd=workspace, env=env,
+                              capture_output=True, text=True,
+                              timeout=spec.get("build_check_timeout_s", 900))
+        code, output = proc.returncode, proc.stdout + proc.stderr
+    except subprocess.TimeoutExpired:
+        timed_out, code, output = True, -1, ""
+    return {"ok": code == 0 and not timed_out, "exit_code": code, "timed_out": timed_out,
+            "duration_s": round(time.monotonic() - started, 3),
+            "output_tail": "\n".join(output.splitlines()[-30:])}
+
+
 def _run_tests(taskset: TaskSet, pairs: list[tuple[str, Path]], workspace: Path, *,
                python: str | None, timeout_s: int, mode: str = "oracle") -> dict[str, Any]:
     runner = list(taskset.test_runner)

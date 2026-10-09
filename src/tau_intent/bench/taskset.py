@@ -80,6 +80,10 @@ class TaskSet:
     #: once per arm workspace with ENV_DIR, WORKSPACE, TASKSET_ROOT, BENCH_PYTHON), ``bin``
     #: (relative to ENV_DIR; first on the agent's PATH and the oracle's interpreter) and
     #: ``timeout_s``. A task set whose host needs compiled extensions builds them here.
+    #: Optional ``build_check``: a script (relative to the task set) the bench runs with
+    #: ``bash`` in the agent's tree before each session, after each editing turn and at the
+    #: end; exit 0 means the package builds. Its output tail is what the agent is shown when
+    #: a session starts on a broken build (``build_check_timeout_s``, default 900).
     environment: dict | None = None
     #: ``cumulative`` (default): the oracle of task k runs the tests of tasks 1..k.
     #: ``own``: it runs task k's directory only; the builder made it cumulative.
@@ -213,8 +217,14 @@ def load_taskset(path: str | Path) -> TaskSet:
         if not isinstance(setup, list) or not setup or not all(isinstance(a, str) for a in setup) \
                 or not isinstance(environment.get("bin"), str):
             raise TasksetError('environment must be {"setup": [argv...], "bin": "<dir>", "timeout_s": <int>}')
+        check = environment.get("build_check")
+        if check is not None and (not isinstance(check, str) or not (root / check).is_file()):
+            raise TasksetError(f"environment.build_check must be a script in the task set (got {check!r})")
         environment = {"setup": list(setup), "bin": environment["bin"],
-                       "timeout_s": int(environment.get("timeout_s", 1800))}
+                       "timeout_s": int(environment.get("timeout_s", 1800)),
+                       **({"build_check": check,
+                           "build_check_timeout_s": int(environment.get("build_check_timeout_s", 900))}
+                          if check else {})}
     return TaskSet(
         root=root, id=str(_need(manifest, "id")), version=str(manifest.get("version", "")),
         language="python", python=python, seed=_dir(root, _need(manifest, "seed"), "seed"),

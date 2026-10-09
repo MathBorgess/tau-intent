@@ -49,10 +49,11 @@ from tau_intent import provider_api as api_mod
 from tau_intent.adapters.code import CodeAdapter
 from tau_intent.bench import environment, record as rec
 from tau_intent.bench.gitws import ArmWorkspace, safe_name
-from tau_intent.bench.oracle import OracleError, check_runner, run_oracle, run_regression, run_snapshot
+from tau_intent.bench.oracle import (OracleError, check_runner, run_build_check, run_oracle, run_regression,
+                                     run_snapshot)
 from tau_intent.bench.taskset import Qualification, Task, TaskSet, TasksetError, load_taskset
 from tau_intent.cli import flags_from_args
-from tau_intent.config import config_hashes, load_bloco_config
+from tau_intent.config import aviso_de_build, config_hashes, load_bloco_config
 from tau_intent.recall import RecallService
 from tau_intent.harness_factory import ProviderSpec, build_harness, system_prompt_sha256
 from tau_intent.rescue_provider import sumarizador_local, sumarizador_nativo
@@ -217,6 +218,32 @@ def _edited(event: Any) -> bool:
         if name in ("write", "edit", "bash"):
             return True
     return False
+
+
+def build_telemetry(inicio: dict[str, Any] | None, fim: dict[str, Any] | None,
+                    snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+    """Breaks and recoveries of the build in one session (owner decision, 2026-10-09).
+
+    ``quebrou``: the session started on a working build and ended on a broken one.
+    ``recuperou``: it started broken (the agent was told) and ended working; ``None``
+    when it started working. The turns come from the build check after each editing
+    turn: the first turn the build was broken, the first turn it worked again.
+    """
+    ok_inicio = bool(inicio and inicio["ok"])
+    ok_fim = bool(fim and fim["ok"])
+    checados = [row for row in snapshots if "build_ok" in row]
+    primeira_quebra = next((row["turn"] for row in checados if not row["build_ok"]), None)
+    primeira_ok = next((row["turn"] for row in checados if row["build_ok"]), None)
+    return {
+        "inicio_ok": ok_inicio, "fim_ok": ok_fim,
+        "aviso_enviado": not ok_inicio,
+        "quebrou": ok_inicio and not ok_fim,
+        "recuperou": None if ok_inicio else ok_fim,
+        "turno_quebra": primeira_quebra if ok_inicio else None,
+        "turno_recuperacao": primeira_ok if not ok_inicio else None,
+        "turnos_com_build_quebrada": sum(1 for row in checados if not row["build_ok"]),
+        "checagens": len(checados) + (inicio is not None) + (fim is not None),
+    }
 
 
 def _event_json(event: Any) -> Any:
@@ -458,6 +485,15 @@ class CellRunner:
         env_bin = Path(env_info["bin"]) if env_info else None
         snapshots: list[dict[str, Any]] = []
         snap_on = self.s.snapshot_oracle == "every-edit" and unit.arm_id != "Q"
+        # Build check (owner decision, 2026-10-09): a session that starts on a broken build
+        # is told so, with the compiler's output, the same way in every arm. The check runs
+        # again after each editing turn and at the end, so breaks and recoveries are recorded.
+        checa_build = unit.arm_id != "Q" and bool((self.taskset.environment or {}).get("build_check"))
+        build_inicio = (run_build_check(self.taskset, ws.path, python=python, home=ws.home)
+                        if checa_build else None)
+        if build_inicio is not None and not build_inicio["ok"]:
+            statement = statement.rstrip() + "\n\n" + aviso_de_build(build_inicio["output_tail"])
+            self.log(f"{unit.label}: build broken at the start (exit {build_inicio['exit_code']}); notice sent")
         transcript = (unit_dir / "transcript.jsonl").open("w", encoding="utf-8")
         seq = {"n": 0}
 
@@ -472,12 +508,17 @@ class CellRunner:
             if kind == "turn_end":
                 state["turn"] += 1
                 if snap_on and _edited(event):
+                    build = (run_build_check(self.taskset, ws.path, python=python, home=ws.home)
+                             if checa_build else None)
                     snap = run_snapshot(self.taskset, unit.index, ws.path, python=python,
                                         timeout_s=self.s.oracle_timeout_s)
                     row = {"turn": state["turn"], "passed": snap["passed"], "failed": snap["failed"],
                            "errors": snap["errors"], "duration_s": snap["duration_s"],
                            "green": bool(snap["pass"] and snap["passed"] and not snap["failed"]
                                          and not snap["errors"])}
+                    if build is not None:
+                        row["build_ok"] = build["ok"]
+                        row["duration_s"] = round(row["duration_s"] + build["duration_s"], 3)
                     snapshots.append(row)
                     with (unit_dir / "snapshots.jsonl").open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(row) + "\n")
@@ -538,6 +579,8 @@ class CellRunner:
         if not flags.capture and store.path.exists():
             raise ArmIsolationError(f"{store.path} exists for an arm with capture off")
 
+        build_fim = (run_build_check(self.taskset, ws.path, python=python, home=ws.home)
+                     if checa_build else None)
         self._progress(unit, "oracle")
         oracle = run_oracle(self.taskset, unit.index, ws.path, python=python, timeout_s=self.s.oracle_timeout_s)
         regression = None
@@ -598,6 +641,11 @@ class CellRunner:
                 record["artifacts"]["paths"]["snapshots"] = f"{rel}/snapshots.jsonl"
         if env_info:
             record["environment"] = {"setup_exit": env_info["setup_exit"], "setup_s": env_info["setup_s"]}
+        if checa_build:
+            record["build"] = build_telemetry(build_inicio, build_fim, snapshots)
+            (unit_dir / "build.json").write_text(json.dumps({"inicio": build_inicio, "fim": build_fim}, indent=2,
+                                                            ensure_ascii=False), encoding="utf-8")
+            record["artifacts"]["paths"]["build"] = f"{rel}/build.json"
         if regression is not None:
             record["artifacts"]["paths"]["regression"] = f"{rel}/regression.json"
             # The record keeps only the host tests that did not pass; regression.json has them all.

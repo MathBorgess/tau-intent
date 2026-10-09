@@ -40,7 +40,17 @@ CONFIG_FILES = (
     "supervisor.yaml",
     "prompts/aviso-de-fim-v1.txt",
     "prompts/consulta-v1.txt",
+    "prompts/aviso-de-build-v1.txt",
 )
+
+#: What a session that starts on a broken build is told, the same in every arm.
+AVISO_DE_BUILD_PROMPT = "prompts/aviso-de-build-v1.txt"
+
+
+def aviso_de_build(saida: str) -> str:
+    """The broken-build notice, with the build check's output tail in a fenced block."""
+    texto = (CONFIG_DIR / AVISO_DE_BUILD_PROMPT).read_text(encoding="utf-8").strip()
+    return texto.format(saida="```\n" + saida.strip() + "\n```")
 
 
 class ConfigError(ValueError):
