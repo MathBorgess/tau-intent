@@ -25,6 +25,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+#: The resolver that names every changed line by its exact def (adapters/code.py).
+RESOLVER_V2 = "stdlib-identities-v2"
+
 WRITE_TOOLS = frozenset({"write", "edit"})
 INTENT_TOOL = "record_intent"
 BASH_TOOL = "bash"
@@ -198,31 +201,46 @@ def _index_regions(regions: Iterable[Region]) -> dict[str, list[Region]]:
 
 
 def _restringir_ao_simbolo(matched: list[Region], declared: str) -> list[Region]:
-    """Declared symbol scopes the call. Empty declared claims every listed hunk.
+    """Declared symbol scopes the call, file by file. Empty declared claims every listed hunk.
 
-    Without a resolved AST name on the hunks, the collector cannot scope and
-    leaves the match as it is (tests and pre-resolve paths). That is not a
-    silent claim of a named def: there is no name to claim.
+    A file whose hunks carry no observable name (a Cython file, an opaque or
+    unparseable one, a supplied range without a symbol) cannot be scoped: an
+    intent that lists it claims all of it. Scoping across the call's files
+    together dropped such a file whenever another listed file had names (pilot
+    run 09c, ``_splitter.pyx`` next to ``_classes.py``). In a file the resolver
+    named, a module-level hunk has no def, so only a file-level intent (no
+    symbol) claims it.
     """
     if not declared:
         return matched
-    if not any(region.symbol for region in matched):
-        return matched
-    return [region for region in matched if simbolo_confere(declared, region.symbol)]
+    por_arquivo: dict[str, list[Region]] = {}
+    for region in matched:
+        por_arquivo.setdefault(region.path, []).append(region)
+    out: list[Region] = []
+    for regions in por_arquivo.values():
+        sem_nomes = not any(r.symbol for r in regions) and all(r.resolver != RESOLVER_V2 for r in regions)
+        if sem_nomes:
+            out.extend(regions)
+        else:
+            out.extend(r for r in regions if r.resolver is None or simbolo_confere(declared, r.symbol))
+    return out
 
 
 def simbolo_confere(declarado: str, testemunhado: str | None) -> bool:
-    """Does the agent's declared symbol name this region's def?
+    """Does the agent's declared symbol name this region's def, or a def around it?
 
     The resolver names a region by its exact dotted def (``Pipeline.predict``).
-    The agent may write that whole name, or its last parts (``predict``); a
-    ``file::`` prefix is dropped. Parts match whole: ``fit`` names ``LDA.fit``
-    and never ``LDA.partial_fit``.
+    The agent may write that whole name or its last parts (``predict``), and a
+    def covers the defs inside it: ``f`` covers ``f.wrapper`` (pilot run 09c),
+    ``Pipeline`` covers ``Pipeline.predict``. A ``file::`` prefix is dropped.
+    Parts match whole: ``fit`` names ``LDA.fit`` and never ``LDA.partial_fit``.
     """
     declarado = str(declarado or "").split("::", 1)[-1].strip()
     if not declarado or not testemunhado:
         return False
-    return testemunhado == declarado or testemunhado.endswith("." + declarado)
+    partes, alvo = declarado.split("."), testemunhado.split(".")
+    n = len(partes)
+    return any(alvo[fim - n:fim] == partes for fim in range(n, len(alvo) + 1))
 
 
 def _match_regions(by_path: Mapping[str, list[Region]], path: str) -> list[Region]:

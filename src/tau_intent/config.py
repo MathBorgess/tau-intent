@@ -41,7 +41,26 @@ CONFIG_FILES = (
     "prompts/aviso-de-fim-v1.txt",
     "prompts/consulta-v1.txt",
     "prompts/aviso-de-build-v1.txt",
+    "prompts/portao-bloqueio-v1.txt",
 )
+
+#: What the agent is told when the gate blocks a turn (owner decision, 2026-10-09).
+PORTAO_BLOQUEIO_PROMPT = "prompts/portao-bloqueio-v1.txt"
+
+
+def mensagem_do_portao() -> tuple[str, dict[str, str], dict[str, str]]:
+    """(header, remedy per gate code, target per identity kind) of the block message."""
+    texto = (CONFIG_DIR / PORTAO_BLOQUEIO_PROMPT).read_text(encoding="utf-8")
+    cabecalho, remedios, alvos = (parte.strip() for parte in texto.split("\n---\n"))
+
+    def secao(bloco: str) -> dict[str, str]:
+        out = {}
+        for linha in bloco.splitlines():
+            chave, _, valor = linha.partition(": ")
+            out[chave.strip()] = valor.strip()
+        return out
+
+    return cabecalho, secao(remedios), secao(alvos)
 
 #: What a session that starts on a broken build is told, the same in every arm.
 AVISO_DE_BUILD_PROMPT = "prompts/aviso-de-build-v1.txt"

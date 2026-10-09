@@ -1,0 +1,11 @@
+The gate blocked this turn: each line below is an edit with no valid recorded intent. Fix every line with record_intent, all lines in one call, and then continue in the same session. Editing the code again does not clear a line; only a recorded intent does.
+---
+AUSENTE: No recorded intent covers it. Record one with {alvo}.
+NAO_PARSEAVEL: Its record_intent call could not be read. Record it again with {alvo}.
+SIMBOLO_NAO_RESOLVIDO: The symbol given does not name this edit. Record it with {alvo}.
+EDICAO_GRANDE_SEM_SIMBOLO: This edit is large and needs a symbol. Record it with {alvo}.
+DOMINIO_AUSENTE: Its intent has no domain. Record it again with {alvo} and a domain.
+---
+simbolo: file "{file}" and symbol "{symbol}"
+modulo: file "{file}" and no symbol (module-level lines)
+arquivo: file "{file}" and no symbol
