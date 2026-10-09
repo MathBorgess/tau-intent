@@ -79,7 +79,8 @@ def mechanism_telemetry(telemetry: dict[str, Any], verdict: str, productive: int
         "servidas": servidas,
         "tokenizer": telemetry.get("tokenizer"),
     }
-    for key in ("gate_avaliado", "captura_publicada", "pendencias_nao_publicadas", "esbarrou_teto",
+    for key in ("gate_avaliado", "captura_publicada", "pendencias_nao_publicadas", "intencoes_nao_publicadas",
+                "regioes_sem_intencao", "chamadas_record_intent", "bloqueios", "esbarrou_teto",
                 "ancoras", "ancoras_vazias", "recibo", "cobertura_de_captura", "cobertura_efetiva",
                 "fracao_resolvida", "denominadores", "aproveitamento_do_bloco", "latencia_de_captura",
                 "erros_de_captura", "efeitos_nao_rastreados", "efeitos_opacos", "erro_de_provedor",

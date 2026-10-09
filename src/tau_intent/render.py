@@ -58,19 +58,41 @@ class Recibo:
 
 
 def render_falhas(falhas: Sequence[Any]) -> str:
+    """One line per (code, identity), naming ``file::symbol`` and the lines.
+
+    The gate checks regions (hunks), but the agent fixes identities: a message
+    that named only the file, once per hunk, left it guessing which def needed
+    a symbol — and it answered one guess per turn (frontier review T4).
+    """
     lines = [
         "O portão bloqueou o turno. Corrija as falhas abaixo e continue na mesma sessão."
     ]
+    grupos: dict[tuple[str, str], dict[str, Any]] = {}
     for falha in falhas:
         code = getattr(falha, "code", None) or (
             falha[0] if isinstance(falha, tuple) else str(falha)
         )
         region = getattr(falha, "region", None)
-        path = getattr(region, "path", None) or getattr(region, "file", None) or region
-        detail = getattr(falha, "detail", "")
-        extra = f" ({detail})" if detail else ""
-        lines.append(f"- {code}: {path}{extra}")
+        grupo = grupos.setdefault((code, _identidade(region)),
+                                  {"spans": [], "detail": getattr(falha, "detail", "")})
+        start, end = getattr(region, "line_start", None), getattr(region, "line_end", None)
+        if start is not None and end is not None:
+            grupo["spans"].append((int(start), int(end)))
+    for (code, ident), grupo in grupos.items():
+        partes = []
+        if grupo["spans"]:
+            partes.append(f"linhas {min(s for s, _ in grupo['spans'])}-{max(e for _, e in grupo['spans'])}")
+        if grupo["detail"]:
+            partes.append(str(grupo["detail"]))
+        extra = f" ({'; '.join(partes)})" if partes else ""
+        lines.append(f"- {code}: {ident}{extra}")
     return "\n".join(lines)
+
+
+def _identidade(region: Any) -> str:
+    if callable(getattr(region, "node_id", None)):
+        return str(region.node_id())
+    return str(getattr(region, "path", None) or getattr(region, "file", None) or region)
 
 
 def render_entry(entry: Any, cfg: BlocoConfig | None = None) -> str:

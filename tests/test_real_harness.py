@@ -168,7 +168,8 @@ class TestRealHarness(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, StubServer(script) as stub:
             root = repo(Path(tmp))
             harness, result = run_arm(root, "B", stub)
-        self.assertEqual(result.block_turns, 1)
+        self.assertEqual(result.bloqueios, 1)  # one gate verdict
+        self.assertEqual(result.block_turns, 2)  # P2: the record_intent turn and the closing turn
         self.assertEqual(result.verdict, "PASSA")
         self.assertIn("AUSENTE", result.follow_ups[0])
         last_user = [m for m in stub.requests[2]["messages"] if m["role"] == "user"][-1]

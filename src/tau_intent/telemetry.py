@@ -133,18 +133,23 @@ def aproveitamento_do_bloco(
     """
     chaves = [chave(entry) for entry in servidas]
     if not chaves:
-        return {"servidas": 0, "reaproveitadas": 0, "razao": None, "chaves": []}
+        return {"servidas": 0, "reaproveitadas": 0, "razao": None, "chaves": [], "criterio": "simbolo"}
     depois = {chave(region) for region in regioes_depois}
     depois |= {chave(item) for item in leituras}
     por_arquivo = {_arquivo(key) for key in depois}
+    # An entry anchored on a symbol is reused only if that symbol changed; a
+    # file-level entry has no finer key, so the file decides. Matching every
+    # entry by file made the ratio 1 in any one-file host (frontier review T9).
     reaproveitadas = [
-        key for key in chaves if key in depois or _arquivo(key) in por_arquivo
+        key for key in chaves
+        if key in depois or ("::" not in key and _arquivo(key) in por_arquivo)
     ]
     return {
         "servidas": len(chaves),
         "reaproveitadas": len(reaproveitadas),
         "razao": len(reaproveitadas) / len(chaves),
         "chaves": sorted(set(reaproveitadas)),
+        "criterio": "simbolo",
     }
 
 

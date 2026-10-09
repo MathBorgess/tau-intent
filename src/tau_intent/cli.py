@@ -140,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         args.manifest.write_text(json.dumps(result.manifest, ensure_ascii=False, indent=2) + "\n")
     print(
         f"verdict={result.verdict} productive={result.productive_turns} "
-        f"blocks={result.block_turns} capture={flags.capture} gate={flags.gate} "
+        f"block_turns={result.block_turns} bloqueios={result.bloqueios} "
+        f"capture={flags.capture} gate={flags.gate} "
         f"project={flags.project} serve={flags.serve}"
     )
     return 0
