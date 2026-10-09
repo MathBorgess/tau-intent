@@ -32,6 +32,10 @@ class CodeEquivalence(unittest.TestCase):
         from tau_intent.adapters import code
         from tau_intent import neighbourhood
         expected=json.loads((Path(__file__).parent/'fixtures/moved_source_hashes.json').read_text())
+        # The exact-name fix (2026-10-09) changed four routines on purpose: one name per
+        # changed line, dotted, decorators inside the def. Their wave-one digests stay in
+        # the old fixture for the record; the routines are pinned again by the v3 one.
+        expected.update(json.loads((Path(__file__).parent/'fixtures/moved_source_hashes_v3.json').read_text()))
         for name,digest in expected.items():
             module=neighbourhood if name in ('Graph','marcar_onipresentes') else code
             self.assertEqual(hashlib.sha256(inspect.getsource(getattr(module,name)).encode()).hexdigest(),digest,name)

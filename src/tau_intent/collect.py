@@ -48,6 +48,12 @@ class Region:
     #: Identity witness supplied by caller, or stamped by the resolver.
     resolver: str | None = "fornecido"
     size_unit: str = "edited_lines"
+    #: The hunk's changed lines, as the diff gives them: ``("+", new line, new
+    #: line, block, text)`` or ``("-", old line, new line it sat before, block,
+    #: text)``. The resolver names each one and splits the hunk where the name
+    #: changes.
+    mudancas: list[tuple[str, int, int, int, str]] = field(default_factory=list, repr=False,
+                                                           compare=False)
 
     def __post_init__(self) -> None:
         if not self.size:
@@ -107,7 +113,7 @@ def collect_events(
     """
     regions = list(regions)
     if workspace is not None:
-        resolver_simbolos(regions, workspace)
+        regions = resolver_simbolos(regions, workspace)
     by_path = _index_regions(regions)
     pendentes: dict[tuple[str, int, int], Pending] = {}
 
@@ -202,7 +208,21 @@ def _restringir_ao_simbolo(matched: list[Region], declared: str) -> list[Region]
         return matched
     if not any(region.symbol for region in matched):
         return matched
-    return [region for region in matched if region.symbol == declared]
+    return [region for region in matched if simbolo_confere(declared, region.symbol)]
+
+
+def simbolo_confere(declarado: str, testemunhado: str | None) -> bool:
+    """Does the agent's declared symbol name this region's def?
+
+    The resolver names a region by its exact dotted def (``Pipeline.predict``).
+    The agent may write that whole name, or its last parts (``predict``); a
+    ``file::`` prefix is dropped. Parts match whole: ``fit`` names ``LDA.fit``
+    and never ``LDA.partial_fit``.
+    """
+    declarado = str(declarado or "").split("::", 1)[-1].strip()
+    if not declarado or not testemunhado:
+        return False
+    return testemunhado == declarado or testemunhado.endswith("." + declarado)
 
 
 def _match_regions(by_path: Mapping[str, list[Region]], path: str) -> list[Region]:
@@ -302,11 +322,11 @@ def resolver_simbolo(source, line_start, line_end):
     return implementation(source, line_start, line_end)
 
 
-def resolver_simbolos(regions, workspace):
+def resolver_simbolos(regions, workspace, fonte_antiga=None):
     if workspace is None:
         return list(regions)
     from tau_intent.adapters.code import resolver_simbolos as implementation
-    return implementation(regions, workspace)
+    return implementation(regions, workspace, fonte_antiga)
 
 
 def simbolos_do_ast(regions, workspace):
