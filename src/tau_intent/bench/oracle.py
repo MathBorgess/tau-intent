@@ -145,6 +145,14 @@ def _run_tests(taskset: TaskSet, pairs: list[tuple[str, Path]], workspace: Path,
             _copy_tests(source, tmp / "tests" / label)
         junit = tmp / "junit.xml"
         env = dict(os.environ)
+        if python is not None:
+            # The arm's own interpreter (task set ``environment``): its directory goes first on
+            # PATH, as in the agent's shell. An editable build that rebuilds on import calls
+            # tools such as ``cython`` by name; without this the first import after a Cython
+            # edit failed with exit 127 (pilot of 2026-10-09).
+            env_bin = os.path.dirname(os.path.abspath(python))
+            env["PATH"] = env_bin + os.pathsep + env.get("PATH", os.defpath)
+            env["VIRTUAL_ENV"] = os.path.dirname(env_bin)
         env["PYTHONPATH"] = str(workspace)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONHASHSEED"] = "0"

@@ -171,3 +171,34 @@ class TestCellWithEnvironmentAndSnapshots(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(READY, "needs pytest")
+class TestOracleSeesTheEnvironmentTools(unittest.TestCase):
+    """Pilot of 2026-10-09: an editable build rebuilt on import calls ``cython`` by name.
+
+    The agent's shell had the arm's ``bin`` on PATH; the oracle's subprocess did not, so the
+    first import after a Cython edit failed with exit 127 and the unit scored 0. The oracle,
+    the regression and the snapshot now put their interpreter's directory first on PATH.
+    """
+
+    def test_the_interpreter_directory_is_first_on_the_oracle_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = demo_copy(Path(tmp))
+            env_bin = Path(tmp) / "env" / "bin"
+            env_bin.mkdir(parents=True)
+            (env_bin / "python").symlink_to(sys.executable)
+            marker = env_bin / "only-in-the-env"
+            marker.write_text("#!/bin/sh\necho ok\n")
+            marker.chmod(0o755)
+            tests = root / "tasks" / "01" / "tests"
+            (tests / "test_path.py").write_text(
+                "import os, shutil\n\ndef test_env_tool_on_path():\n"
+                "    assert shutil.which('only-in-the-env')\n"
+                "    assert os.environ['VIRTUAL_ENV'].endswith('env')\n")
+            ws = Path(tmp) / "ws"
+            shutil.copytree(root / "reference" / "01", ws)
+            ts = load_taskset(root)
+            result = run_oracle(ts, 1, ws, python=str(env_bin / "python"))
+        outcome = {t["nodeid"].rsplit("::", 1)[-1]: t["outcome"] for t in result["per_test"]}
+        self.assertEqual(outcome["test_env_tool_on_path"], "passed")
