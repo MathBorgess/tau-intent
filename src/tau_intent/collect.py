@@ -111,7 +111,7 @@ def collect_events(
     by_path = _index_regions(regions)
     pendentes: dict[tuple[str, int, int], Pending] = {}
 
-    for ordinal, event in enumerate(events):
+    for ordinal, event in _expandir_lotes(events):
         name = _tool_name(event)
         args, raw, unparseable = _tool_args(event)
         if name in WRITE_TOOLS or name == INTENT_TOOL or name == BASH_TOOL:
@@ -156,6 +156,32 @@ def collect_events(
 
     resolver_simbolos([p.region for p in pendentes.values()], workspace)
     return pendentes
+
+
+def _expandir_lotes(events: Iterable[Any]) -> Iterable[tuple[int, Any]]:
+    """One record_intent with ``intents: [...]`` is one call per item (Q3).
+
+    Every item keeps the ordinal of the call that carried it, so capture
+    latency is measured to the batch. An item that is not an object is an
+    unparseable call, exactly as a malformed single call would be.
+    """
+    for ordinal, event in enumerate(events):
+        if _tool_name(event) != INTENT_TOOL:
+            yield ordinal, event
+            continue
+        args, raw, _ = _tool_args(event)
+        if "intents" not in args:
+            yield ordinal, event
+            continue
+        itens = args.get("intents")
+        if not isinstance(itens, list) or not itens:
+            yield ordinal, {"tool_name": INTENT_TOOL, "args": {}, "_raw_arguments": itens}
+            continue
+        for item in itens:
+            if isinstance(item, dict):
+                yield ordinal, {"tool_name": INTENT_TOOL, "args": dict(item)}
+            else:
+                yield ordinal, {"tool_name": INTENT_TOOL, "args": {}, "_raw_arguments": item}
 
 
 def _index_regions(regions: Iterable[Region]) -> dict[str, list[Region]]:
@@ -291,7 +317,7 @@ def simbolos_do_ast(regions, workspace):
 def diagnosticos_de_captura(events):
     """Historical rejected calls remain visible after a valid replacement."""
     rejected = []
-    for ordinal, event in enumerate(events):
+    for ordinal, event in _expandir_lotes(events):
         name = _tool_name(event)
         if name not in WRITE_TOOLS | {INTENT_TOOL, BASH_TOOL}:
             continue

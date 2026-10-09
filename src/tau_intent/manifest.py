@@ -67,6 +67,9 @@ def manifest_da_execucao(flags: Any, telemetry: dict[str, Any], **kwargs: Any) -
                   "codigos_nao_avaliaveis", "alvos_excluidos",
                   "edge_types_efetivos", "grafo_heterogeneo", "adaptadores", "modo", "servidas", "esbarrou_teto", "gate_avaliado", "erros_de_captura", "captura_publicada", "pendencias_nao_publicadas",
                   "intencoes_nao_publicadas", "regioes_sem_intencao", "chamadas_record_intent",
+                  "publicacao", "intencoes_publicadas", "portao_no_encerramento", "aviso_de_fim",
+                  "teto_absoluto", "turnos_por_classe", "turnos_do_mecanismo", "visao_modo", "consultas",
+                  "chamadas_recall_intent", "tokens_servidos_instrucao", "tokens_servidos_consultas",
                   "encerramento", "erro_de_provedor", "chamada_interrompida", "tokens", "turnos",
                   "amostragem", "bloco_vazio", "efeitos_nao_rastreados", "efeitos_opacos"):
         execucao[campo] = telemetry.get(campo)

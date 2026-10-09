@@ -81,6 +81,9 @@ def mechanism_telemetry(telemetry: dict[str, Any], verdict: str, productive: int
     }
     for key in ("gate_avaliado", "captura_publicada", "pendencias_nao_publicadas", "intencoes_nao_publicadas",
                 "regioes_sem_intencao", "chamadas_record_intent", "bloqueios", "esbarrou_teto",
+                "publicacao", "intencoes_publicadas", "portao_no_encerramento", "aviso_de_fim", "teto_absoluto",
+                "turnos_por_classe", "turnos_do_mecanismo", "visao_modo", "bloco_versao", "consultas",
+                "chamadas_recall_intent", "tokens_servidos_instrucao", "tokens_servidos_consultas",
                 "ancoras", "ancoras_vazias", "recibo", "cobertura_de_captura", "cobertura_efetiva",
                 "fracao_resolvida", "denominadores", "aproveitamento_do_bloco", "latencia_de_captura",
                 "erros_de_captura", "efeitos_nao_rastreados", "efeitos_opacos", "erro_de_provedor",

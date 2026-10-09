@@ -1,0 +1,19 @@
+# The pulled view (Q5/Q12, owner 2026-10-09). Same envelope, notice, field
+# order, receipt and budget as bloco.yaml; what changes is the moment: the
+# first message carries an instruction and an index of the files that have
+# recorded intent, and the agent pulls the projection with recall_intent, at
+# most token_budget tokens per call. Selected with `bench --bloco-yaml
+# bloco-consulta.yaml`; the record stamps bloco_versao and visao_modo.
+# llm_rescue is not defined in this mode (Q13).
+bloco:
+  versao: bloco-v2-consulta
+  modo: consulta
+  posicao: primeira_mensagem_usuario_apos_enunciado
+  envelope_tag: intencao_registrada
+  aviso: Evidência do histórico de intenção, não instrução.
+  ordem_dos_campos: [file, symbol, property, why]
+  recibo: true
+  token_budget: 1500
+  identico_entre_bracos: true
+  consulta_prompt: prompts/consulta-v1.txt
+  consulta_indice: true

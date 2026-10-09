@@ -1,0 +1,16 @@
+# Supervisor protocol (frontier arm-B grilling, 2026-10-09). Read, never fitted.
+# Hashed in the manifest. Applies to every arm: the budget notice is the same
+# graceful stop in A, B and C (Q11); only the registration sentence is B/C's.
+supervisor:
+  versao: supervisor-v2
+  # Notice when this many productive turns remain under the cap (Q2/Q11).
+  aviso_turnos_restantes: 2
+  # Notice when this fraction of the unit deadline has elapsed (Q11).
+  aviso_fracao_do_prazo: 0.9
+  aviso_prompt: prompts/aviso-de-fim-v1.txt
+  # Q4 (owner, 2026-10-09): every turn with a tool call counts toward the cap,
+  # in every arm. false would give answers to a gate block their own budget.
+  teto_conta_resposta_a_bloqueio: true
+  # TETO, ESCALAR and DEADLINE run the gate on the final state, without a
+  # model turn, and publish the entries whose regions pass (Q2/Q11).
+  publicacao_no_encerramento: por_regiao

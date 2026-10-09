@@ -181,14 +181,21 @@ class TestManifesto(unittest.TestCase):
         self.assertEqual(entry["tau"]["version"], "0.4.7")
 
     def test_config_sha256_continua_o_mesmo_do_baseline_v2(self) -> None:
-        """Refactors and the bench slices must not touch the frozen config members."""
+        """Refactors and the bench slices must not touch the frozen config members.
+
+        v3 (arm-B grilling, 2026-10-09) added members on purpose: supervisor.yaml,
+        bloco-consulta.yaml and two prompts. Every v2 member stays byte-identical,
+        and the full v3 list is pinned so a further member cannot slip in.
+        """
         import json
         from pathlib import Path
 
-        golden = json.loads(
-            (Path(__file__).parent / "fixtures" / "config_sha256_v2.json").read_text()
-        )
-        self.assertEqual(config_hashes(), golden)
+        fixtures = Path(__file__).parent / "fixtures"
+        golden_v2 = json.loads((fixtures / "config_sha256_v2.json").read_text())
+        golden_v3 = json.loads((fixtures / "config_sha256_v3.json").read_text())
+        atual = config_hashes()
+        self.assertEqual({k: atual.get(k) for k in golden_v2}, golden_v2)
+        self.assertEqual(atual, golden_v3)
 
     def test_config_hashes_muda_se_o_arquivo_mudar(self) -> None:
         antes = config_hashes()

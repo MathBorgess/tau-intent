@@ -21,7 +21,10 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
+from dataclasses import replace
+
 from tau_intent.collect import Pending, Region
+from tau_intent.config import load_supervisor_config
 from tau_intent.fake_provider import FakeHarness, FakeToolStart, FakeTurnEnd
 from tau_intent.gate import Falha
 from tau_intent.graph import Graph
@@ -55,10 +58,16 @@ def _run(script, **kwargs):
                                     symbols={"f"}, **kwargs))
 
 
+# T3 is about counting what a unit did not publish. Since Q2 the cap publishes
+# what passes the gate, so these cases switch end publication off to keep a
+# discarded intent to count.
+SEM_PUBLICACAO_NO_FIM = replace(load_supervisor_config(), publicacao_no_encerramento="nenhuma")
+
+
 class TestT3DiscardedIntentsAreNotTouchedRegions(unittest.TestCase):
     def test_capped_unit_with_an_intent_counts_one_discarded_intent(self):
         result = _run([[WRITE, RECORD, FakeTurnEnd(tool_results=[{"tool_name": "write"}])]],
-                      max_productive_turns=1)
+                      max_productive_turns=1, supervisor_cfg=SEM_PUBLICACAO_NO_FIM)
         tel = result.telemetry
         self.assertEqual(result.verdict, "TETO")
         self.assertFalse(tel["captura_publicada"])
@@ -68,7 +77,8 @@ class TestT3DiscardedIntentsAreNotTouchedRegions(unittest.TestCase):
         self.assertEqual(tel["chamadas_record_intent"], 1)
 
     def test_capped_unit_without_an_intent_discards_no_intent(self):
-        result = _run([[WRITE, FakeTurnEnd(tool_results=[{"tool_name": "write"}])]], max_productive_turns=1)
+        result = _run([[WRITE, FakeTurnEnd(tool_results=[{"tool_name": "write"}])]], max_productive_turns=1,
+                      supervisor_cfg=SEM_PUBLICACAO_NO_FIM)
         tel = result.telemetry
         self.assertEqual(tel["pendencias_nao_publicadas"], 1)
         self.assertEqual(tel["intencoes_nao_publicadas"], 0)

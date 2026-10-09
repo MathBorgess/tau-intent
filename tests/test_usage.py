@@ -84,7 +84,7 @@ class TestUsageThroughTheRealLoop(unittest.TestCase):
         self.assertEqual((tokens["rescue_in"], tokens["rescue_out"]), (0, 0))
         rows = result.telemetry["turnos"]
         # V0.2: throughput telemetry rides on each row (descriptive); the V1 fields are unchanged
-        self.assertEqual([{k: v for k, v in row.items() if k not in ("latency_ms", "ttft_ms")} for row in rows], [
+        self.assertEqual([{k: v for k, v in row.items() if k not in ("latency_ms", "ttft_ms", "classe", "misto", "ferramentas")} for row in rows], [
             {"turn_index": 1, "kind": "productive", "tokens_in": 100, "tokens_out": 20, "tool_calls": 1},
             {"turn_index": 2, "kind": "productive", "tokens_in": 150, "tokens_out": 30, "tool_calls": 0},
         ])

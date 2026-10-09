@@ -30,4 +30,5 @@ class ManifestEvidence(unittest.TestCase):
 
     def test_refactor_cannot_change_config_hashes(self):
         expected=json.loads((Path(__file__).parent/'fixtures/v1_1_code.json').read_text())
-        self.assertEqual(config_hashes(),expected['config_sha256'])
+        atual=config_hashes()  # v3 added members; the v1.1 ones stay byte-identical
+        self.assertEqual({k:atual.get(k) for k in expected['config_sha256']},expected['config_sha256'])

@@ -48,7 +48,8 @@ from tau_intent.bench.gitws import ArmWorkspace, safe_name
 from tau_intent.bench.oracle import OracleError, check_runner, run_oracle, run_regression
 from tau_intent.bench.taskset import Qualification, Task, TaskSet, TasksetError, load_taskset
 from tau_intent.cli import flags_from_args
-from tau_intent.config import config_hashes
+from tau_intent.config import config_hashes, load_bloco_config
+from tau_intent.recall import RecallService
 from tau_intent.harness_factory import ProviderSpec, build_harness, system_prompt_sha256
 from tau_intent.rescue_provider import sumarizador_local, sumarizador_nativo
 from tau_intent.store import IntentStore
@@ -117,6 +118,9 @@ class CellSettings:
     strand: str | None = None
     #: Anthropic only: prepend the subscription identity block (declared, off by default).
     anthropic_oauth_identity: bool = False
+    #: Block contract file inside the package. ``bloco-consulta.yaml`` is the pulled
+    #: view of the arm-B grilling (Q5/Q12); the record stamps its version and mode.
+    bloco_yaml: str = "bloco.yaml"
 
     def spec(self, seed: int, timeout_s: float) -> ProviderSpec:
         return ProviderSpec(self.provider_url, self.model, seed, timeout_s=timeout_s, api_key=self.api_key,
@@ -220,6 +224,9 @@ class CellRunner:
     # ------------------------------------------------------------------ entry
     def run(self, assign: dict[str, Any]) -> CellOutcome:
         assign = validate_assign(dict(assign))
+        if load_bloco_config(self.s.bloco_yaml).modo == "consulta" and "C" in assign["arms"]:
+            raise CellError("bad_assign", "arm C (llm_rescue) is not defined with the pulled view "
+                                          f"({self.s.bloco_yaml}); decision Q13 of 2026-10-09")
         cell_id = assign["cell_id"]
         cell_dir = self.s.out_dir / cell_id
         if cell_dir.exists() and any(cell_dir.iterdir()):
@@ -421,8 +428,13 @@ class CellRunner:
 
         spec = self.s.spec(assign["seed"], float(assign["deadline_s"]))
 
+        bloco_cfg = load_bloco_config(self.s.bloco_yaml)
+        adapter = CodeAdapter(base=before)
+        recall = (RecallService(store, adapter, ws.path, bloco_cfg=bloco_cfg)
+                  if flags.serve and bloco_cfg.modo == "consulta" else None)
+
         async def session() -> Any:
-            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0)
+            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0, recall=recall)
             try:
                 summarizer = None
                 if flags.llm_rescue and self.s.native:
@@ -434,7 +446,7 @@ class CellRunner:
                 result = await run_task(
                     ws.path, flags, prompt=statement, task_id=f"task-{unit.index:02d}",
                     max_productive_turns=assign["max_productive_turns"], harness=harness, store=store,
-                    summarizer_fn=summarizer, adapter=CodeAdapter(base=before),
+                    summarizer_fn=summarizer, adapter=adapter, bloco_cfg=bloco_cfg, recall=recall,
                     modelo_produtor=self.s.model, modelo_consumidor=self.s.model,
                     deadline_s=float(assign["deadline_s"]), on_event=on_event)
                 return result, summarizer
@@ -485,6 +497,7 @@ class CellRunner:
             "bench": {"deadline_s": assign["deadline_s"], "max_productive_turns": assign["max_productive_turns"],
                       "seed": assign["seed"], "model": self.s.model, "provider_url": self._s(self.s.provider_url),
                       "system_prompt_sha256": system_prompt_sha256(),
+                      "bloco_yaml": self.s.bloco_yaml,
                       "rescue_model": self.s.model if flags.llm_rescue else None,
                       "attempt": unit.attempt,
                       **({"protocol": spec.describe()} if self.s.native else {})},
