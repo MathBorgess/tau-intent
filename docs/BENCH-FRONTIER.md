@@ -120,6 +120,26 @@ the arm-B grilling: B gets an instruction, an index and the `recall_intent` tool
 that combines it with arm C stops before the first unit (`bad_assign`, decision Q13). The
 manifest's `bench.bloco_yaml` and the record's `bloco_versao`/`visao_modo` say which ran.
 
+### 4.2 Heavyweight brownfield task sets (2026-10-09)
+
+Three optional declarations, all inside the hashed task set, for a host that needs a built
+environment (the SWE-Milestone scikit-learn chain):
+
+- `environment`: `{"setup": [argv], "bin": "<dir>", "timeout_s": N}`. The setup runs once per
+  arm workspace, before the arm's first unit and outside its clock, with `ENV_DIR`
+  (`<arm root>/env`, outside the agent's tree), `WORKSPACE`, `TASKSET_ROOT` and
+  `BENCH_PYTHON`. `ENV_DIR/bin` goes first on the agent's PATH and is the interpreter of the
+  oracle and the regression. A failed setup stops the cell (`environment_failed`). After an
+  infrastructure retry the setup runs again, because the reset cleans ignored files.
+- `oracle_scope`: `cumulative` (default, tasks 1..k) or `own` (task k's directory only).
+- `TAU_INTENT_ORACLE_MODE` (`oracle` | `snapshot`) is set for every test run, so the task set's
+  conftest can narrow a run.
+
+`--snapshot-oracle every-edit` runs task k's tests after every turn that called `write`, `edit` or
+`bash`, outside the agent's tree. The supervisor takes that time off the deadline
+(`fora_do_relogio_s`). Each run is a line of `snapshots.jsonl`; the record gets
+`snapshot_oracle.turns_to_green`, the first turn at which the snapshot was green (Q6).
+
 ## 5. Infrastructure retries
 
 Subscriptions have windows (five-hour, weekly) and sessions expire; a long run will

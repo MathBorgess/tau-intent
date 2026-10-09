@@ -104,6 +104,8 @@ def build_parser() -> argparse.ArgumentParser:
     work.add_argument("--bloco-yaml", default="bloco.yaml",
                       help="block contract inside the package: bloco.yaml (pushed block, v1) or "
                            "bloco-consulta.yaml (pulled view, recall_intent; no arm C)")
+    work.add_argument("--snapshot-oracle", choices=("off", "every-edit"), default="off",
+                      help="run task k's tests after every editing turn, outside the agent's tree and clock")
     work.add_argument("--keep-workspaces", action="store_true")
     work.add_argument("--skip-preflight", action="store_true", help="do not probe the endpoint first")
     work.add_argument("--skip-pin-check", action="store_true", help="development only")
@@ -183,7 +185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         provider_api=args.provider_api, sampling=sampling, reasoning_effort=args.reasoning_effort,
         max_output_tokens=args.max_output_tokens, infra_retries=max(0, args.infra_retries),
         infra_wait_s=args.infra_wait_s, infra_max_wait_s=args.infra_max_wait_s, strand=args.strand,
-        anthropic_oauth_identity=args.anthropic_oauth_identity, bloco_yaml=args.bloco_yaml)
+        anthropic_oauth_identity=args.anthropic_oauth_identity, bloco_yaml=args.bloco_yaml,
+        snapshot_oracle=args.snapshot_oracle)
     args.out.mkdir(parents=True, exist_ok=True)
     log(f"task set {taskset.id} {taskset.version} sha {taskset.sha[:12]} ({len(taskset.tasks)} tasks); "
         f"model {args.model} via {args.provider_api if native else kind} at "

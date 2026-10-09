@@ -115,10 +115,14 @@ def truncate_head(text: str, max_lines: int = DEFAULT_MAX_LINES,
 
 
 def make_executors(workspace: Path, *, bash_timeout_s: float = DEFAULT_BASH_TIMEOUT_S,
-                   home: Path | None = None) -> dict[str, Executor]:
-    """The four executors, bound to ``workspace``. Keyed by tool name."""
+                   home: Path | None = None, env_bin: Path | None = None) -> dict[str, Executor]:
+    """The four executors, bound to ``workspace``. Keyed by tool name.
+
+    ``env_bin``: the arm's own interpreter directory (task set ``environment``),
+    first on PATH, so ``python`` in the agent's shell is the one its code builds in.
+    """
     workspace = Path(workspace)
-    env = _command_env(home)
+    env = _command_env(home, env_bin)
 
     async def read(tool_call_id, arguments, signal=None, on_update=None):
         del tool_call_id, signal, on_update
@@ -265,12 +269,15 @@ def _kill(process: "asyncio.subprocess.Process") -> None:
         pass
 
 
-def _command_env(home: Path | None) -> dict[str, str]:
+def _command_env(home: Path | None, env_bin: Path | None = None) -> dict[str, str]:
     env = {key: os.environ[key] for key in _ENV_ALLOW if key in os.environ}
     path = env.get("PATH", os.defpath)
     interpreter_dir = os.path.dirname(sys.executable)
     if interpreter_dir and interpreter_dir not in path.split(os.pathsep):
         path = interpreter_dir + os.pathsep + path
+    if env_bin is not None:
+        path = str(env_bin) + os.pathsep + path
+        env["VIRTUAL_ENV"] = str(Path(env_bin).parent)
     env["PATH"] = path
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["GIT_TERMINAL_PROMPT"] = "0"

@@ -183,6 +183,12 @@ async def run_task(
     # block (arm C) is part of what C costs, so it runs on this clock too.
     relogio = relogio or time.monotonic
     clock_start = relogio()
+    # Time spent in ``on_event`` (the bench's mid-session oracle snapshots, Q6)
+    # is the bench's, not the agent's: it is taken off the deadline.
+    fora_do_relogio = 0.0
+
+    def decorrido() -> float:
+        return relogio() - clock_start - fora_do_relogio
     adapter = get_adapter(adapter) if isinstance(adapter, str) else adapter
     workspace = Path(workspace)
     if store is None:
@@ -314,7 +320,7 @@ async def run_task(
     events = harness.prompt(prompt_text).__aiter__()
     try:
         while True:
-            remaining = None if deadline_s is None else deadline_s - (relogio() - clock_start)
+            remaining = None if deadline_s is None else deadline_s - decorrido()
             if remaining is not None and remaining <= 0:
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
                 tel["chamada_interrompida"] = not last_was_turn_end
@@ -332,7 +338,9 @@ async def run_task(
                 break
             last_was_turn_end = _is_turn_end(event)
             if on_event is not None:
+                antes = relogio()
                 on_event(event)
+                fora_do_relogio += relogio() - antes
             # Only the events the collector understands feed it. tau also emits
             # tool_execution_update/_end events that carry ``tool_name`` and no
             # ``args``: handed to the collector they read as malformed capture calls.
@@ -387,7 +395,7 @@ async def run_task(
                     if restantes is not None and 0 < restantes <= sup_cfg.aviso_turnos_restantes:
                         enviar_aviso("teto")
                     elif deadline_s is not None and \
-                            relogio() - clock_start >= sup_cfg.aviso_fracao_do_prazo * deadline_s:
+                            decorrido() >= sup_cfg.aviso_fracao_do_prazo * deadline_s:
                         enviar_aviso("prazo")
                 continue
             if diff is None:
@@ -495,6 +503,7 @@ async def run_task(
     tel["erros_de_captura"] = diagnosticos_de_captura(collected_events)
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
+    tel["fora_do_relogio_s"] = round(fora_do_relogio, 3)
     tel["productive_turns"] = productive
     tel["block_turns"] = sum(1 for turno in turnos if turno["kind"] == "block")
     tel["bloqueios"] = blocks

@@ -32,10 +32,14 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import os
 import re
+import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -45,7 +49,7 @@ from tau_intent import provider_api as api_mod
 from tau_intent.adapters.code import CodeAdapter
 from tau_intent.bench import environment, record as rec
 from tau_intent.bench.gitws import ArmWorkspace, safe_name
-from tau_intent.bench.oracle import OracleError, check_runner, run_oracle, run_regression
+from tau_intent.bench.oracle import OracleError, check_runner, run_oracle, run_regression, run_snapshot
 from tau_intent.bench.taskset import Qualification, Task, TaskSet, TasksetError, load_taskset
 from tau_intent.cli import flags_from_args
 from tau_intent.config import config_hashes, load_bloco_config
@@ -121,6 +125,9 @@ class CellSettings:
     #: Block contract file inside the package. ``bloco-consulta.yaml`` is the pulled
     #: view of the arm-B grilling (Q5/Q12); the record stamps its version and mode.
     bloco_yaml: str = "bloco.yaml"
+    #: ``every-edit``: after every turn that edited files, run task k's tests outside the
+    #: agent's tree and clock (Q6, turns to green). ``off`` keeps the runs as they were.
+    snapshot_oracle: str = "off"
 
     def spec(self, seed: int, timeout_s: float) -> ProviderSpec:
         return ProviderSpec(self.provider_url, self.model, seed, timeout_s=timeout_s, api_key=self.api_key,
@@ -198,6 +205,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _edited(event: Any) -> bool:
+    """Did this turn call a tool that can change files?"""
+    message = getattr(event, "message", None)
+    for call in getattr(message, "tool_calls", None) or []:
+        name = getattr(call, "name", None) or (call.get("name") if isinstance(call, dict) else None)
+        if name in ("write", "edit", "bash"):
+            return True
+    for result in getattr(event, "tool_results", None) or []:
+        name = getattr(result, "tool_name", None) or (result.get("tool_name") if isinstance(result, dict) else None)
+        if name in ("write", "edit", "bash"):
+            return True
+    return False
+
+
 def _event_json(event: Any) -> Any:
     if hasattr(event, "model_dump"):
         return event.model_dump(mode="json", by_alias=True)
@@ -215,6 +236,7 @@ class CellRunner:
         self._log = log
         self.log = lambda message: log(self._s(message))
         self._workspaces: dict[str, ArmWorkspace] = {}
+        self._envs: dict[str, dict[str, Any]] = {}
         self._tmp_roots: list[Path] = []
 
     def _s(self, text: str) -> str:
@@ -342,7 +364,34 @@ class CellRunner:
             seed = unit.task.seed if isinstance(unit.task, Qualification) else self.taskset.seed
             ws.create(seed)
             self._workspaces[key] = ws
+            if unit.arm_id != "Q" and self.taskset.environment:
+                self._envs[key] = self._setup_environment(ws, key)
         return self._workspaces[key]
+
+    def _setup_environment(self, ws: ArmWorkspace, key: str) -> dict[str, Any]:
+        """The task set's per-arm environment, outside the agent's tree (``root/env``)."""
+        spec = self.taskset.environment
+        env_dir = ws.root / "env"
+        env_dir.mkdir(parents=True, exist_ok=True)
+        env = dict(os.environ)
+        env.update({"ENV_DIR": str(env_dir), "WORKSPACE": str(ws.path), "TASKSET_ROOT": str(self.taskset.root),
+                    "BENCH_PYTHON": sys.executable, "HOME": str(ws.home)})
+        started = time.monotonic()
+        log_path = self.cell_dir / "environment" / f"{key}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log:
+            try:
+                proc = subprocess.run(spec["setup"], cwd=self.taskset.root, env=env, stdout=log,
+                                      stderr=subprocess.STDOUT, timeout=spec["timeout_s"])
+                code = proc.returncode
+            except subprocess.TimeoutExpired:
+                code = -1
+        info = {"setup_exit": code, "setup_s": round(time.monotonic() - started, 1),
+                "bin": str(env_dir / spec["bin"]), "python": str(env_dir / spec["bin"] / "python")}
+        if code != 0:
+            raise CellError("environment_failed", f"environment setup for arm {key} exited {code}; see {log_path}")
+        self.log(f"environment for arm {key}: ready in {info['setup_s']} s")
+        return info
 
     def _unit_dir(self, unit: Unit) -> Path:
         if unit.arm_id == "Q":
@@ -404,6 +453,11 @@ class CellRunner:
         self._progress(unit, "start")
 
         state = {"turn": 0, "in": 0, "out": 0, "known": True}
+        env_info = self._envs.get(unit.arm_id) if unit.arm_id != "Q" else None
+        python = env_info["python"] if env_info else None
+        env_bin = Path(env_info["bin"]) if env_info else None
+        snapshots: list[dict[str, Any]] = []
+        snap_on = self.s.snapshot_oracle == "every-edit" and unit.arm_id != "Q"
         transcript = (unit_dir / "transcript.jsonl").open("w", encoding="utf-8")
         seq = {"n": 0}
 
@@ -417,6 +471,16 @@ class CellRunner:
             transcript.flush()
             if kind == "turn_end":
                 state["turn"] += 1
+                if snap_on and _edited(event):
+                    snap = run_snapshot(self.taskset, unit.index, ws.path, python=python,
+                                        timeout_s=self.s.oracle_timeout_s)
+                    row = {"turn": state["turn"], "passed": snap["passed"], "failed": snap["failed"],
+                           "errors": snap["errors"], "duration_s": snap["duration_s"],
+                           "green": bool(snap["pass"] and snap["passed"] and not snap["failed"]
+                                         and not snap["errors"])}
+                    snapshots.append(row)
+                    with (unit_dir / "snapshots.jsonl").open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(row) + "\n")
                 uso = uso_do_provedor(getattr(event, "message", None))
                 if uso is None:
                     state["known"] = False
@@ -434,7 +498,8 @@ class CellRunner:
                   if flags.serve and bloco_cfg.modo == "consulta" else None)
 
         async def session() -> Any:
-            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0, recall=recall)
+            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0, recall=recall,
+                                    env_bin=env_bin)
             try:
                 summarizer = None
                 if flags.llm_rescue and self.s.native:
@@ -474,10 +539,10 @@ class CellRunner:
             raise ArmIsolationError(f"{store.path} exists for an arm with capture off")
 
         self._progress(unit, "oracle")
-        oracle = run_oracle(self.taskset, unit.index, ws.path, timeout_s=self.s.oracle_timeout_s)
+        oracle = run_oracle(self.taskset, unit.index, ws.path, python=python, timeout_s=self.s.oracle_timeout_s)
         regression = None
         if unit.arm_id != "Q":
-            regression = run_regression(self.taskset, ws.path, timeout_s=self.s.oracle_timeout_s)
+            regression = run_regression(self.taskset, ws.path, python=python, timeout_s=self.s.oracle_timeout_s)
         evolution = ws.evolution(before, after)
 
         # ---- artifacts of this unit
@@ -524,6 +589,15 @@ class CellRunner:
                        "manifest": f"{rel}/manifest.json", "oracle": f"{rel}/oracle.json",
                        "prompt": f"{rel}/prompt.txt"}},
             manifest_run=result.manifest if result else None, error=error)
+        if snap_on:
+            green = [s["turn"] for s in snapshots if s["green"]]
+            record["snapshot_oracle"] = {"mode": self.s.snapshot_oracle, "runs": len(snapshots),
+                                         "turns_to_green": green[0] if green else None,
+                                         "duration_s": round(sum(s["duration_s"] for s in snapshots), 3)}
+            if snapshots:
+                record["artifacts"]["paths"]["snapshots"] = f"{rel}/snapshots.jsonl"
+        if env_info:
+            record["environment"] = {"setup_exit": env_info["setup_exit"], "setup_s": env_info["setup_s"]}
         if regression is not None:
             record["artifacts"]["paths"]["regression"] = f"{rel}/regression.json"
             # The record keeps only the host tests that did not pass; regression.json has them all.
@@ -571,6 +645,8 @@ class CellRunner:
             lost_commit = ws.discard_attempt(before, tag)
             parked = self._park_attempt(unit, n)
             self._restore_arm(unit, snapshot)
+            if unit.arm_id in self._envs:  # the reset cleaned ignored files: build the environment again
+                self._envs[unit.arm_id] = self._setup_environment(ws, unit.arm_id)
             retries.append({"attempt": n, "kind": kind, "detail": record["error"]["detail"],
                             "tokens": record["tokens"], "turns": len(record["turns"]),
                             "started_at": record["started_at"], "ended_at": record["ended_at"],

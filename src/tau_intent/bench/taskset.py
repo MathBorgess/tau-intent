@@ -76,6 +76,14 @@ class TaskSet:
     #: task's oracle, so a task set that only grows the repository around the same chain
     #: keeps the same ``task_hash`` per task.
     regression: Path | None = None
+    #: Optional per-arm environment (``"environment"`` in taskset.json): ``setup`` (argv, run
+    #: once per arm workspace with ENV_DIR, WORKSPACE, TASKSET_ROOT, BENCH_PYTHON), ``bin``
+    #: (relative to ENV_DIR; first on the agent's PATH and the oracle's interpreter) and
+    #: ``timeout_s``. A task set whose host needs compiled extensions builds them here.
+    environment: dict | None = None
+    #: ``cumulative`` (default): the oracle of task k runs the tests of tasks 1..k.
+    #: ``own``: it runs task k's directory only; the builder made it cumulative.
+    oracle_scope: str = "cumulative"
 
     def task(self, index: int) -> Task:
         for task in self.tasks:
@@ -196,8 +204,19 @@ def load_taskset(path: str | Path) -> TaskSet:
         if not isinstance(r, dict) or not isinstance(r.get("tests"), str):
             raise TasksetError('regression must be {"tests": "<dir>"}')
         regression = _dir(root, r["tests"], "regression tests")
+    scope = manifest.get("oracle_scope", "cumulative")
+    if scope not in ("cumulative", "own"):
+        raise TasksetError(f"oracle_scope must be cumulative or own (got {scope!r})")
+    environment = manifest.get("environment")
+    if environment is not None:
+        setup = environment.get("setup") if isinstance(environment, dict) else None
+        if not isinstance(setup, list) or not setup or not all(isinstance(a, str) for a in setup) \
+                or not isinstance(environment.get("bin"), str):
+            raise TasksetError('environment must be {"setup": [argv...], "bin": "<dir>", "timeout_s": <int>}')
+        environment = {"setup": list(setup), "bin": environment["bin"],
+                       "timeout_s": int(environment.get("timeout_s", 1800))}
     return TaskSet(
         root=root, id=str(_need(manifest, "id")), version=str(manifest.get("version", "")),
         language="python", python=python, seed=_dir(root, _need(manifest, "seed"), "seed"),
         test_runner=tuple(runner), tasks=tuple(tasks), qualification=qualification,
-        sha=hash_taskset(root), regression=regression)
+        sha=hash_taskset(root), regression=regression, environment=environment, oracle_scope=scope)
