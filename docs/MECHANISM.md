@@ -66,3 +66,35 @@ message did not mean what the design says. They change no promise of the mechani
 | T6b | `block_turns` is P2 of the pre-registration: every model turn between a `BLOQUEIA` and the next gate run. The verdicts are counted apart | `block_turns` (turns), `bloqueios` (verdicts). Records before this change carry verdicts in `block_turns` |
 | T8 | Hunks of one symbol with the same why/property/domain are one decision and one entry; the projection collapses identical entries that older stores still hold | `_entradas_a_gravar`; telemetry `duplicadas_colapsadas` |
 | T9 | A served entry with a symbol counts as reused only if that symbol changed; a file-level entry still matches by file | `aproveitamento_do_bloco.criterio = "simbolo"` |
+
+## Arm B v2 (owner decisions of the arm-B grilling, 2026-10-09)
+
+Decided by the owner in the vault note `wiki/projects/harness-tau/2026-10-09-decisoes-grilling-braco-b`.
+Each change is a declared config member (hashed) or a tool description.
+
+1. **Graceful stop (Q2/Q11).** Two productive turns before the cap, and at 90% of the deadline,
+   the supervisor steers a budget notice into the session (`supervisor.yaml`,
+   `prompts/aviso-de-fim-v1.txt`). Every arm gets it; with capture on it adds one sentence:
+   record your intents in one call. The notice spends no turn: it rides on the next one.
+2. **Publication at the end (Q2/Q11).** `TETO`, `ESCALAR` and `DEADLINE` run the gate once
+   more, on the final state, without a model turn, and publish the entries whose regions pass.
+   `PASSA` still publishes everything; `ERRO` publishes nothing. Telemetry: `publicacao`
+   (`total` | `parcial` | `nenhuma`), `intencoes_publicadas`, `portao_no_encerramento`.
+3. **Registration in one call (Q3/Q14).** `record_intent` takes `intents: [...]`; the single
+   form still works. The description asks, in English, for what the code and the git log
+   cannot say: the reason, the property to keep, the rejected alternative.
+4. **The pulled view (Q5/Q12).** With `bloco-consulta.yaml` the first message carries an
+   instruction and an index of the files that have recorded intent, and nothing else of the
+   history. `recall_intent(paths, symbols)` returns the v1 projection anchored where the agent
+   asked: deterministic, 1 hop, deduplicated, at most `token_budget` tokens per call, with the
+   receipt. Every call is telemetry (`consultas`: turn, arguments, entries, tokens, and how
+   many of them the unit then changed). `bloco.yaml` keeps the v1 push, byte for byte.
+   `llm_rescue` is not defined with the pulled view (Q13) and is refused.
+5. **Turn classes (Q15).** Every model turn has `classe`: `trabalho` (marked `misto` when it
+   also called a mechanism tool), `registro`, `consulta`, `resposta_a_bloqueio`,
+   `encerramento`, `final`. A turn that answers a block is the block's, whatever it called
+   (the pre-registration's anti-double-count rule). `turnos_do_mecanismo` = registro +
+   consulta + resposta_a_bloqueio.
+6. **What counts toward the cap (Q4).** `supervisor.teto_conta_resposta_a_bloqueio` declares
+   it. `true` counts every turn with a tool call in every arm; `false` gives the answers to a
+   block their own budget (rule 5 of `AGENTS.md`) under a hard ceiling of three caps.

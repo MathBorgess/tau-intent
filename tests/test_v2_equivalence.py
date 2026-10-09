@@ -24,7 +24,8 @@ class CodeEquivalence(unittest.TestCase):
         v=portao([r],{r.key():Pending(r,why='w',domain='d',symbol='f')},{'src/mod.py::f'},load_gate_config(),0)
         self.assertEqual({'tipo':v.tipo,'falhas':list(v.falhas)},expected['veredito'])
         self.assertFalse(v.nao_avaliaveis)
-        self.assertEqual(config_hashes(),expected['config_sha256'])
+        atual=config_hashes()  # v3 added members; the v1.1 ones stay byte-identical
+        self.assertEqual({k:atual.get(k) for k in expected['config_sha256']},expected['config_sha256'])
 
     def test_moved_routines_are_byte_identical_to_wave_one(self):
         import inspect,hashlib

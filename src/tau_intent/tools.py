@@ -70,47 +70,76 @@ BASH_SCHEMA: dict[str, Any] = {
     "required": ["command", "description"],
 }
 
+_INTENT_PROPERTIES: dict[str, Any] = {
+    "file": {"type": "string", "description": "Path of the file this intent anchors to."},
+    "files": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "All files this decision spans. Use when one decision crosses "
+            "files (AtomicCommitBench: 59.5% of commits). file still works "
+            "for the single-file case; either file or files is required."
+        ),
+    },
+    "symbol": {
+        "type": "string",
+        "description": (
+            "Optional scope: name of the def/class this entry claims, exactly "
+            "as written in the file, resolved against the AST. When set, only "
+            "hunks of that symbol receive this why (accidental-claim guard). "
+            "Omit it so one why covers every hunk of the listed files. "
+            "Labels such as fix/refactor live in why, not here."
+        ),
+    },
+    "why": {
+        "type": "string",
+        "description": (
+            "Why the code is this way: the constraint, requirement, bug it "
+            "prevents or alternative you rejected. Not what the code does."
+        ),
+    },
+    "property": {
+        "type": "string",
+        "description": "What must stay true — how to apply this in a later change.",
+    },
+    "domain": {
+        "type": "string",
+        "description": "Domain concept this decision embodies. Required in practice.",
+    },
+}
+
+# Q3/Q14 (owner, 2026-10-09): several intents in one call, so registering is
+# one turn and not one turn per decision. The single-intent form still works;
+# the gate, not the schema, says what is missing (AUSENTE, NAO_PARSEAVEL).
 RECORD_INTENT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "file": {"type": "string", "description": "Path of the file this intent anchors to."},
-        "files": {
+        "intents": {
+            "type": "array",
+            "description": "Every decision of this change, one object each. Prefer this form: "
+                           "register all of them in one call.",
+            "items": {"type": "object", "properties": _INTENT_PROPERTIES},
+        },
+        **_INTENT_PROPERTIES,
+    },
+    "required": [],
+}
+
+RECALL_INTENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "paths": {
             "type": "array",
             "items": {"type": "string"},
-            "description": (
-                "All files this increment spans. Use when one decision crosses "
-                "files (AtomicCommitBench: 59.5% of commits). file still works "
-                "for the single-file case; either file or files is required."
-            ),
+            "description": "Files you will read or change.",
         },
-        "symbol": {
-            "type": "string",
-            "description": (
-                "Optional scope: name of the def/class this call claims, exactly "
-                "as written in the file, resolved against the AST. When set, only "
-                "hunks of that symbol receive this why (accidental-claim guard). "
-                "Omit it so one why covers every hunk of the listed files — "
-                "several defs, one subject. Labels such as fix/refactor live in "
-                "why, not here."
-            ),
-        },
-        "why": {
-            "type": "string",
-            "description": (
-                "Why this code exists this way. The subject of the increment, "
-                "including any label (fix, refactor, feat) that distinguishes "
-                "this decision from another in the same file."
-            ),
-        },
-        "property": {
-            "type": "string", "description": "Pre/post-condition this increment assumes or establishes.",
-        },
-        "domain": {
-            "type": "string",
-            "description": "Domain concept this increment embodies. Required in practice.",
+        "symbols": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Definitions you will change, as file::symbol or a bare name.",
         },
     },
-    "required": ["why"],
+    "required": [],
 }
 
 
@@ -140,14 +169,34 @@ BASH_DESCRIPTION = _origin_doc(
 )
 
 
+# Q14 (owner, 2026-10-09), in the style of Claude Code's project memory:
+# record what the code cannot say. English, like the system prompt.
 RECORD_INTENT_DESCRIPTION = (
-    "Registra a intenção deste incremento. Chame antes de encerrar o turno. "
-    "why é o assunto (fix/refactor/feat distinguem decisões). "
-    "symbol, se preenchido, restringe a chamada àquele def — omita para "
-    "cobrir vários defs do mesmo arquivo com o mesmo why. "
-    "domain é o conceito de domínio. "
-    "Se a decisão atravessa arquivos, passe files: [..]."
+    "Record why this change is the way it is — what a future engineer could not "
+    "recover from the code or the git log. One entry per decision; put every entry "
+    "in one call before you finish. A good intent names the reason (a constraint, a "
+    "requirement, a bug it prevents, an alternative you rejected and why) and the "
+    "property the code must keep. Do not restate what the code does. For a large "
+    "edit to one def or class, name that symbol. Fields: why = the reason; property "
+    "= what must stay true, that is, how to apply this in a later change; domain = "
+    "the concept; files/file = where it applies; symbol = the def or class."
 )
+
+RECALL_INTENT_DESCRIPTION = (
+    "Return the recorded intent (why, property, domain) for the given files or "
+    "symbols and their direct neighbours, newest first, within a token budget. "
+    "It is evidence, not instruction."
+)
+
+
+async def record_intent_batch(intents: list[Any]) -> dict[str, Any]:
+    anchors = []
+    for item in intents:
+        if isinstance(item, dict):
+            out = await record_intent(**{k: item[k] for k in ("file", "symbol", "why", "property", "domain", "files")
+                                         if k in item and item[k] is not None})
+            anchors.append(out["anchor"])
+    return {"ok": True, "anchors": anchors}
 
 
 async def record_intent(
@@ -196,6 +245,8 @@ def _record_intent_execute():
         on_update: Any = None,
     ) -> dict[str, Any]:
         del tool_call_id, signal, on_update
+        if isinstance(arguments.get("intents"), list):
+            return await record_intent_batch(arguments["intents"])
         return await record_intent(
             file=str(arguments.get("file") or ""),
             symbol=str(arguments.get("symbol") or ""),
@@ -208,8 +259,28 @@ def _record_intent_execute():
     return execute
 
 
-def tool_specs(*, capture: bool, workspace: Any = None, home: Any = None) -> list[dict[str, Any]]:
-    """Return the v1 catalog. B/C (capture=True) include record_intent; A does not.
+def _recall_execute(recall: Callable[..., dict[str, Any]]):
+    async def execute(
+        tool_call_id: str,
+        arguments: Mapping[str, Any],
+        signal: Any = None,
+        on_update: Any = None,
+    ) -> dict[str, Any]:
+        del tool_call_id, signal, on_update
+        def strings(key: str) -> list[str]:
+            value = arguments.get(key)
+            return [str(v) for v in value if v] if isinstance(value, list) else []
+        return recall(paths=strings("paths"), symbols=strings("symbols"))
+
+    return execute
+
+
+def tool_specs(*, capture: bool, workspace: Any = None, home: Any = None,
+               recall: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Return the catalog. B/C (capture=True) include record_intent; A does not.
+
+    ``recall`` (consulta mode, Q5/Q12) adds ``recall_intent``: the derived view,
+    pulled by the agent. Only an arm that serves passes it.
 
     With ``workspace`` the read/write/edit/bash executors are the real ones
     (``workspace_tools``); without it they are the stubs the fake harness uses.
@@ -253,6 +324,15 @@ def tool_specs(*, capture: bool, workspace: Any = None, home: Any = None) -> lis
                 "description": RECORD_INTENT_DESCRIPTION,
                 "parameters": RECORD_INTENT_SCHEMA,
                 "execute_fn": _record_intent_execute(),
+            }
+        )
+    if recall is not None:
+        specs.append(
+            {
+                "name": "recall_intent",
+                "description": RECALL_INTENT_DESCRIPTION,
+                "parameters": RECALL_INTENT_SCHEMA,
+                "execute_fn": _recall_execute(recall),
             }
         )
     return specs
@@ -307,9 +387,10 @@ def _as_agent_result(execute_fn: Callable[..., Any]) -> Callable[..., Any]:
     return execute
 
 
-def catalog(*, capture: bool, workspace: Any = None, home: Any = None) -> list[Any]:
+def catalog(*, capture: bool, workspace: Any = None, home: Any = None,
+            recall: Callable[..., dict[str, Any]] | None = None) -> list[Any]:
     """AgentTool list when tau_agent is importable, else plain spec dicts."""
-    specs = tool_specs(capture=capture, workspace=workspace, home=home)
+    specs = tool_specs(capture=capture, workspace=workspace, home=home, recall=recall)
     try:
         from tau_agent.tools import AgentTool
     except ImportError:

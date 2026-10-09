@@ -1,0 +1,3 @@
+Budget notice: {restantes} turns are left in this session. Finish the change you are making and do not start new work.
+---registro---
+Before you stop, record your intents in one record_intent call.

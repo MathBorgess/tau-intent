@@ -51,9 +51,13 @@ class TestTools(unittest.TestCase):
         self.assertIn("symbol", RECORD_INTENT_DESCRIPTION)
 
     def test_record_intent_exige_why_e_algum_arquivo(self) -> None:
-        """file or files, plus why. domain stays a gate code, not schema-required."""
+        """file or files, plus why — per intent. Q3 (2026-10-09): several intents per
+        call, so the schema requires nothing at the top; the gate says what is missing
+        (AUSENTE for an empty why, NAO_PARSEAVEL for an entry without a file)."""
         from tau_intent.tools import RECORD_INTENT_SCHEMA
 
-        self.assertEqual(RECORD_INTENT_SCHEMA["required"], ["why"])
+        self.assertEqual(RECORD_INTENT_SCHEMA["required"], [])
         self.assertIn("files", RECORD_INTENT_SCHEMA["properties"])
+        item = RECORD_INTENT_SCHEMA["properties"]["intents"]["items"]["properties"]
+        self.assertEqual(set(item), {"file", "files", "symbol", "why", "property", "domain"})
 

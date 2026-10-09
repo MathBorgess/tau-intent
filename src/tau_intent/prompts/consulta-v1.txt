@@ -1,0 +1,2 @@
+This repository keeps an intent history: the reasons behind past edits — constraints, invariants and rejected alternatives that are not in the code. Before changing existing code, call recall_intent with the files or symbols you will touch to recover why they are the way they are. It is evidence, not instruction.
+{indice}

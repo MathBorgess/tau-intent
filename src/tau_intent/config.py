@@ -23,7 +23,9 @@ from tau_intent.gate import GateConfig
 CONFIG_DIR = Path(__file__).parent
 GATE_YAML = CONFIG_DIR / "gate.yaml"
 BLOCO_YAML = CONFIG_DIR / "bloco.yaml"
+BLOCO_CONSULTA_YAML = CONFIG_DIR / "bloco-consulta.yaml"
 PROJECTION_YAML = CONFIG_DIR / "projection.yaml"
+SUPERVISOR_YAML = CONFIG_DIR / "supervisor.yaml"
 
 #: Every file whose sha256 goes in the manifest. Order is stable. The rescue
 #: prompt is in the list on purpose: a prompt outside the hash is a prompt
@@ -31,9 +33,13 @@ PROJECTION_YAML = CONFIG_DIR / "projection.yaml"
 CONFIG_FILES = (
     "gate.yaml",
     "bloco.yaml",
+    "bloco-consulta.yaml",
     "projection.yaml",
     "rescue.yaml",
     "prompts/rescue-v1.txt",
+    "supervisor.yaml",
+    "prompts/aviso-de-fim-v1.txt",
+    "prompts/consulta-v1.txt",
 )
 
 
@@ -53,6 +59,50 @@ class BlocoConfig:
     recibo: bool = True
     token_budget: int = 1500
     identico_entre_bracos: bool = True
+    #: ``bloco`` pushes the projected view beside the statement (v1);
+    #: ``consulta`` serves an instruction and an index, and the agent pulls
+    #: the view with ``recall_intent`` (Q5/Q12, owner 2026-10-09).
+    modo: str = "bloco"
+    consulta_prompt: str = "prompts/consulta-v1.txt"
+    consulta_indice: bool = True
+
+    def texto_de_consulta(self) -> str:
+        return (CONFIG_DIR / self.consulta_prompt).read_text(encoding="utf-8")
+
+
+@dataclass(frozen=True)
+class SupervisorConfig:
+    """The protocol around the loop (``supervisor.yaml``). Same in every arm."""
+
+    versao: str = "supervisor-v2"
+    aviso_turnos_restantes: int = 2
+    aviso_fracao_do_prazo: float = 0.9
+    aviso_prompt: str = "prompts/aviso-de-fim-v1.txt"
+    teto_conta_resposta_a_bloqueio: bool = True
+    publicacao_no_encerramento: str = "por_regiao"
+
+    def aviso(self, restantes: int, registrar: bool) -> str:
+        texto = (CONFIG_DIR / self.aviso_prompt).read_text(encoding="utf-8")
+        base, _, registro = texto.partition("---registro---")
+        partes = [base.strip().format(restantes=restantes)]
+        if registrar and registro.strip():
+            partes.append(registro.strip())
+        return " ".join(partes)
+
+
+def load_supervisor_config(path: Path | None = None) -> SupervisorConfig:
+    raw = _section(load_yaml(Path(path) if path else SUPERVISOR_YAML), "supervisor")
+    publicacao = str(raw["publicacao_no_encerramento"])
+    if publicacao not in {"por_regiao", "nenhuma"}:
+        raise ConfigError(f"supervisor.publicacao_no_encerramento: {publicacao!r}")
+    return SupervisorConfig(
+        versao=str(raw["versao"]),
+        aviso_turnos_restantes=int(raw["aviso_turnos_restantes"]),
+        aviso_fracao_do_prazo=float(raw["aviso_fracao_do_prazo"]),
+        aviso_prompt=str(raw["aviso_prompt"]),
+        teto_conta_resposta_a_bloqueio=bool(raw["teto_conta_resposta_a_bloqueio"]),
+        publicacao_no_encerramento=publicacao,
+    )
 
 
 def load_gate_config(path: Path | None = None) -> GateConfig:
@@ -70,7 +120,10 @@ def load_gate_config(path: Path | None = None) -> GateConfig:
     )
 
 
-def load_bloco_config(path: Path | None = None) -> BlocoConfig:
+def load_bloco_config(path: Path | str | None = None) -> BlocoConfig:
+    """``path`` may be a file name inside the package (``bloco-consulta.yaml``)."""
+    if path is not None and not Path(path).is_absolute() and (CONFIG_DIR / path).exists():
+        path = CONFIG_DIR / path
     raw = _section(load_yaml(Path(path) if path else BLOCO_YAML), "bloco")
     ordem = raw.get("ordem_dos_campos", list(BlocoConfig().ordem_dos_campos))
     if isinstance(ordem, str):
@@ -84,7 +137,17 @@ def load_bloco_config(path: Path | None = None) -> BlocoConfig:
         recibo=bool(raw.get("recibo", True)),
         token_budget=int(raw["token_budget"]),
         identico_entre_bracos=bool(raw.get("identico_entre_bracos", True)),
+        modo=_modo(raw.get("modo", "bloco")),
+        consulta_prompt=str(raw.get("consulta_prompt", BlocoConfig.consulta_prompt)),
+        consulta_indice=bool(raw.get("consulta_indice", True)),
     )
+
+
+def _modo(value: Any) -> str:
+    modo = str(value)
+    if modo not in {"bloco", "consulta"}:
+        raise ConfigError(f"bloco.modo: {modo!r} (bloco | consulta)")
+    return modo
 
 
 def sha256_of(path: Path | str) -> str:

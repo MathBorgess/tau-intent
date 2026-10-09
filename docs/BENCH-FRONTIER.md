@@ -113,6 +113,13 @@ tau 0.4.7's Google parser drops `usageMetadata`; the runner reads it off the res
 bytes (`UsageFromWire`) and records it as `provider_usage` (it is the provider's
 figure, read one layer lower), with `thoughtsTokenCount` counted as output.
 
+### 4.1 `--bloco-yaml` (2026-10-09)
+
+`bloco.yaml` (default) is the v1 pushed block. `bloco-consulta.yaml` is the pulled view of
+the arm-B grilling: B gets an instruction, an index and the `recall_intent` tool. A cell
+that combines it with arm C stops before the first unit (`bad_assign`, decision Q13). The
+manifest's `bench.bloco_yaml` and the record's `bloco_versao`/`visao_modo` say which ran.
+
 ## 5. Infrastructure retries
 
 Subscriptions have windows (five-hour, weekly) and sessions expire; a long run will
