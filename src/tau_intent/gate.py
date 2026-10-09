@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
+from tau_intent.collect import simbolo_confere
+
 #: The structural taxonomy (G-8 + G-2). Declared here, frozen in ``gate.yaml``.
 #: ANCORA_AMBIGUA was deleted: grouping is authorship (the why), not AST names.
 CODIGOS = (
@@ -188,9 +190,20 @@ def _lookup(pendentes: Mapping[object, object], region: object) -> object | None
         return pendentes[path]
     for candidate in pendentes.values():
         cand_region = getattr(candidate, "region", candidate)
-        if _region_path(cand_region) == path and _ranges_overlap(region, cand_region):
+        if (_region_path(cand_region) == path and _ranges_overlap(region, cand_region)
+                and _mesmo_simbolo(region, cand_region)):
             return candidate
     return None
+
+
+def _mesmo_simbolo(region: object, other: object) -> bool:
+    """Two named regions of different defs never stand in for each other.
+
+    A split hunk puts ``A.f`` and ``A.g`` side by side; an intent on one must
+    not satisfy the gate for the other just because the line ranges touch.
+    """
+    a, b = _region_symbol(region), _region_symbol(other)
+    return not (a and b) or a == b
 
 
 def _region_key(region: object) -> tuple:
@@ -298,7 +311,7 @@ def _resolve(symbol: str, region: object, known: set[str]) -> bool:
     if not symbol:
         return False
     witnessed = _region_symbol(region)
-    if witnessed and symbol != witnessed:
+    if witnessed and not simbolo_confere(symbol, witnessed):
         return False
     if symbol in known:
         return True

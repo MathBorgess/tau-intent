@@ -97,7 +97,12 @@ class RecallService:
 
     def _ancoras(self, paths: Sequence[str], symbols: Sequence[str], graph: Any,
                  correntes: Sequence[Any]) -> list[str]:
-        """Graph node ids for what the agent asked. A bare name matches every ``file::name``."""
+        """Graph node ids for what the agent asked.
+
+        A bare name matches every ``file::name`` and every dotted def that ends
+        in it (``fit`` finds ``file::LDA.fit``); the projection maps a dotted
+        name to its graph node.
+        """
         conhecidos = set(getattr(graph, "nodes", {}) or {}) | {chave(e) for e in correntes}
         ancoras: list[str] = []
         for path in paths:
@@ -111,5 +116,6 @@ class RecallService:
             if "::" in symbol:
                 ancoras.append(symbol)
             else:
-                ancoras.extend(sorted(n for n in conhecidos if n.endswith("::" + symbol)))
+                ancoras.extend(sorted(n for n in conhecidos
+                                      if n.endswith("::" + symbol) or n.endswith("." + symbol)))
         return list(dict.fromkeys(ancoras))

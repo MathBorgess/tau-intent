@@ -67,6 +67,31 @@ message did not mean what the design says. They change no promise of the mechani
 | T8 | Hunks of one symbol with the same why/property/domain are one decision and one entry; the projection collapses identical entries that older stores still hold | `_entradas_a_gravar`; telemetry `duplicadas_colapsadas` |
 | T9 | A served entry with a symbol counts as reused only if that symbol changed; a file-level entry still matches by file | `aproveitamento_do_bloco.criterio = "simbolo"` |
 
+## Exact region names (owner decision after the SWE-Milestone pilot, 2026-10-09)
+
+The pilot's gate asked for names the agent could not give. A hunk was named by the
+innermost def around *all* its lines, so three things went wrong: a decorator sits
+before its `def` in the AST (an edit of `@validate_params(...)` was named by the
+module); the three context lines of the diff crossed into the previous def (a
+signature change was named by the class); and the name was bare (`fit`, never
+`QuadraticDiscriminantAnalysis.fit`). In one unit that made 11 block turns and an
+`ESCALAR`.
+
+The resolver (`stdlib-identities-v2`) now names each **changed line**:
+
+- by the innermost def or class around it, with the decorators inside the def, by its
+  dotted name (`Pipeline.predict`); module-level lines name the file;
+- an added line in the post-edit tree, a removed line in the pre-edit tree (`git show
+  base:path`), so a deleted method keeps its own name;
+- context lines name nothing; blank changed lines join the nearest non-blank change; a
+  line removed and added back unchanged is not a change.
+
+A hunk is split where the name changes: one region per def. A declared symbol covers a
+region when it is the region's dotted name or its last parts (`fit` covers
+`LDA.fit`, never `LDA.partial_fit`). Two regions of different defs never stand in for
+each other at the gate. The code graph keeps bare node names; the projection and
+`recall_intent` map a dotted name to its graph node. Tests: `tests/test_v3_nome_exato.py`.
+
 ## Arm B v2 (owner decisions of the arm-B grilling, 2026-10-09)
 
 Decided by the owner in the vault note `wiki/projects/harness-tau/2026-10-09-decisoes-grilling-braco-b`.

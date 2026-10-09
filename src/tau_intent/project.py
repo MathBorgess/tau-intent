@@ -122,6 +122,7 @@ def projetar(
     and never leaves this module.
     """
     budget = cfg.token_budget if orcamento_token is None else orcamento_token
+    ancoras = [no_do_grafo(graph, a) for a in ancoras]
     entries, colapsadas = _colapsar_duplicadas(entries)
     hubs = marcar_onipresentes(graph, cfg.lambda_grau) if cfg.prune_hubs else set()
     alcancados, nao_expandidos = expandir_com_recibo(
@@ -131,7 +132,7 @@ def projetar(
     recencias = _recencias(entries)
     scored: list[tuple[float, int, Any]] = []
     for entry in entries:
-        node = _node_id(entry)
+        node = no_do_grafo(graph, _node_id(entry))
         if node not in alcancados:
             continue
         why = str(getattr(entry, "why", "") or "")
@@ -417,6 +418,24 @@ def _colapsar_duplicadas(entries: Sequence[Any]) -> tuple[list[Any], int]:
             escolhidas[chave] = (ts, ordem, entry)
     unicas = [item[2] for item in sorted(escolhidas.values(), key=lambda item: item[1])]
     return unicas, len(entries) - len(unicas)
+
+
+def no_do_grafo(graph: Graph, node_id: str) -> str:
+    """The graph node for a ``file::symbol`` id.
+
+    The gate names a def exactly (``file::Pipeline.predict``); the code graph
+    names it by its bare name (``file::predict``). A dotted id the graph does
+    not have is looked up by its last part; anything else is returned as it is.
+    """
+    nodes = getattr(graph, "nodes", None) or {}
+    if node_id in nodes:
+        return node_id
+    path, sep, symbol = node_id.partition("::")
+    if sep and "." in symbol:
+        bare = f"{path}::{symbol.rsplit('.', 1)[-1]}"
+        if bare in nodes:
+            return bare
+    return node_id
 
 
 def _node_id(entry: Any) -> str:
