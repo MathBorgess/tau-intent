@@ -38,6 +38,8 @@ def oracle_dirs(taskset: TaskSet, k: int) -> list[tuple[str, Path]]:
         if taskset.qualification is None:
             raise OracleError("this task set has no qualification task")
         return [("q", taskset.qualification.tests)]
+    if taskset.oracle_scope == "own":
+        return [(f"{k:02d}", taskset.task(k).tests)]
     return [(f"{t.index:02d}", t.tests) for t in taskset.tasks if t.index <= k]
 
 
@@ -105,6 +107,18 @@ def run_oracle(taskset: TaskSet, k: int, workspace: Path, *, python: str | None 
     return _run_tests(taskset, pairs, workspace, python=python, timeout_s=timeout_s)
 
 
+def run_snapshot(taskset: TaskSet, k: int, workspace: Path, *, python: str | None = None,
+                 timeout_s: int = DEFAULT_TIMEOUT_S) -> dict[str, Any]:
+    """Task k's own tests, mid-session (Q6: turns to green). The agent never sees them.
+
+    ``TAU_INTENT_ORACLE_MODE=snapshot`` lets the task set's conftest narrow the run
+    (for SWE-Milestone: only the milestone's own fail-to-pass tests).
+    """
+    workspace = Path(os.path.abspath(workspace))
+    return _run_tests(taskset, [(f"{k:02d}", taskset.task(k).tests)], workspace, python=python,
+                      timeout_s=timeout_s, mode="snapshot")
+
+
 def run_regression(taskset: TaskSet, workspace: Path, *, python: str | None = None,
                    timeout_s: int = DEFAULT_TIMEOUT_S) -> dict[str, Any] | None:
     """The host repository's frozen suite against the workspace, or ``None`` if the
@@ -119,7 +133,7 @@ def run_regression(taskset: TaskSet, workspace: Path, *, python: str | None = No
 
 
 def _run_tests(taskset: TaskSet, pairs: list[tuple[str, Path]], workspace: Path, *,
-               python: str | None, timeout_s: int) -> dict[str, Any]:
+               python: str | None, timeout_s: int, mode: str = "oracle") -> dict[str, Any]:
     runner = list(taskset.test_runner)
     if runner and runner[0] == "python":
         runner[0] = python or sys.executable
@@ -134,6 +148,7 @@ def _run_tests(taskset: TaskSet, pairs: list[tuple[str, Path]], workspace: Path,
         env["PYTHONPATH"] = str(workspace)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONHASHSEED"] = "0"
+        env["TAU_INTENT_ORACLE_MODE"] = mode
         # Concurrent runners: pytest's tmp_path base and any scratch file stay in this run's own dir.
         (tmp / "scratch").mkdir()
         env["TMPDIR"] = str(tmp / "scratch")
