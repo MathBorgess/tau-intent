@@ -80,6 +80,27 @@ class RecallService:
         servidas = list(tel.get("servidas") or [])
         texto = bloco if servidas else SEM_HISTORICO
         self.servidas.extend(servidas)
+        normalized_paths = [str(path).strip().removeprefix("./") for path in paths if str(path).strip()]
+        direct_matches = [e for e in correntes if getattr(e.anchor, "file", None) in normalized_paths or chave(e) in ancoras]
+        receipt = tel.get("recibo") or {}
+        empty_reason = (None if servidas else "no_published_history" if not correntes else
+                        "no_query_anchors" if not ancoras else
+                        "budget_cut" if receipt.get("cortadas_por_orcamento", 0) else
+                        "no_direct_or_reachable_history" if not direct_matches else
+                        "direct_history_not_selected")
+        diagnostic = {
+            "store_entries_total": len(store._entries),
+            "store_entries_current": len(correntes),
+            "store_entries_superseded": len(store._entries) - len(correntes),
+            "current_entry_ids": [entry.id for entry in correntes],
+            "current_task_ids": sorted({entry.task_id for entry in correntes}),
+            "current_files": sorted({str(entry.anchor.file) for entry in correntes}),
+            "normalized_paths": normalized_paths,
+            "direct_matching_entry_ids": [entry.id for entry in direct_matches],
+            "served_entry_ids": [getattr(entry, "id", None) for entry in servidas],
+            "empty_reason": empty_reason,
+            "semantics": "direct matches diagnose query overlap; graph reachability and budget still determine serving",
+        }
         self.chamadas.append({
             "ordem": len(self.chamadas) + 1,
             "turno": self.turno_atual,
@@ -92,6 +113,7 @@ class RecallService:
             "tokens": count_tokens(texto),
             "recibo": tel.get("recibo"),
             "duplicadas_colapsadas": tel.get("duplicadas_colapsadas", 0),
+            "diagnostic": diagnostic,
         })
         return {"ok": True, "intent": texto}
 
