@@ -23,7 +23,7 @@ HARNESS_BY_ARM = {"A": "tau", "B": "tau_intent", "C": "tau_intent_llm_rescue", "
 #: Which mechanism flags an arm id stands for. Q is the qualification round in
 #: the plain-tau configuration.
 FLAG_ARM_BY_ARM_ID = {"A": "A", "B": "B", "C": "C", "Q": "A"}
-TERMINATIONS = ("completed", "teto_turnos", "deadline", "stopped", "error")
+TERMINATIONS = ("completed", "teto_turnos", "teto_chamadas", "deadline", "stopped", "error")
 RUNNER_KINDS = ("ollama", "lmstudio", "llamacpp", "other")
 ACCELS = ("cuda", "metal", "cpu", "other")
 FLAG_KEYS = ("capture", "gate", "project", "serve", "llm_rescue")

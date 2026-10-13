@@ -131,6 +131,42 @@ def git(repo: Path, *args: str) -> str:
 
 
 # ======================================================================= units
+@unittest.skipUnless(READY, "needs pytest and tau-ai (pip install .[bench])")
+class TestNativeTotalCapPersistence(unittest.TestCase):
+    def test_total_cap_records_survive_persistence_for_both_native_protocols(self):
+        for api in (ANTHROPIC, CODEX):
+            with self.subTest(api=api), tempfile.TemporaryDirectory() as tmp:
+                def model(index, body):
+                    names = tool_names(api, body)
+                    if steps(api, body) == 0:
+                        # A real edit without an intention makes B's final gate block.
+                        return tools(call("write", {"path": "calc/ops.py", "content": OPS}))
+                    if "record_intent" in names:
+                        return text("done")
+                    return tools(call("bash", {"command": "true"}))
+                with NativeStub(api, model) as stub:
+                    code, stdout = run_cell(Path(tmp), stub, "--k-max", "1", "--max-total-calls", "2",
+                                            "--skip-preflight", arms="A,B", taskset=DEMO)
+                    requests = len(stub.requests)
+                (cell_dir,) = [p for p in Path(tmp).iterdir() if p.is_dir()]
+                records = read_records(cell_dir)
+                self.assertEqual(code, 0, stdout)
+                self.assertEqual(requests, 4)
+                self.assertEqual(len(records), 2)
+                for record in records:
+                    self.assertEqual(validate_record(record), [])
+                    unknown = {**record, "terminated_by": "unknown_cap"}
+                    self.assertIn("terminated_by", validate_record(unknown))
+                    self.assertEqual(record["terminated_by"], "teto_chamadas")
+                    self.assertIsNone(record["error"])
+                    telemetry = record["mechanism_telemetry"]
+                    self.assertEqual(telemetry["actual_total_calls"], 2)
+                    self.assertEqual(telemetry["total_call_cap"], 2)
+                    self.assertTrue(telemetry["total_call_cap_reached"])
+                    self.assertEqual(telemetry["total_call_count_source"], "wire_requests")
+                self.assertGreater(records[1]["mechanism_telemetry"]["bloqueios"], 0)
+
+
 class TestSamplingPolicy(unittest.TestCase):
     def test_stamped_writes_the_fields_each_protocol_has(self):
         self.assertEqual(api_mod.stamp_for(api_mod.OPENAI_COMPLETIONS, "stamped", temperature=0, seed=7),

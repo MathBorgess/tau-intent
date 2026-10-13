@@ -138,7 +138,7 @@ One record per (cell, arm, task). Qualification attempts use `arm_id:"Q"`, `harn
   "tokens": {"in": 0, "out": 0, "rescue_in": 0, "rescue_out": 0, "source": "provider_usage|missing", "cost_usd": 0},
   "turns": [{"turn_index": 1, "kind": "productive|block|rescue", "tokens_in": 0, "tokens_out": 0, "tool_calls": 2}],
   "mechanism_telemetry": {"verdict": "PASSA", "productive_turns": 4, "block_turns": 1, "bloco_vazio": false, "tokens_served": 210, "nao_avaliaveis": [], "servidas": []},
-  "terminated_by": "completed|teto_turnos|deadline|stopped|error",
+  "terminated_by": "completed|teto_turnos|teto_chamadas|deadline|stopped|error",
   "started_at": "ISO-8601", "ended_at": "ISO-8601",
   "artifacts": {"bundle": "<cellId>.tar.gz", "paths": {"transcript": "arms/B/task-01/transcript.jsonl", "diff": "arms/B/task-01/diff.patch", "manifest": "arms/B/task-01/manifest.json"}}
 }
