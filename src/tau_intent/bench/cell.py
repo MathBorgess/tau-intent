@@ -182,6 +182,9 @@ def validate_assign(assign: dict[str, Any]) -> dict[str, Any]:
         value = assign[key]
         if not isinstance(value, int) or isinstance(value, bool):
             raise CellError("bad_assign", f"{key} must be an int")
+    cap = assign.get("max_total_calls")
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap < 1):
+        raise CellError("bad_assign", "max_total_calls must be a positive integer")
     if assign["k_max"] < 1 or assign["deadline_s"] < 1 or assign["max_productive_turns"] < 1:
         raise CellError("bad_assign", "k_max, deadline_s and max_productive_turns must be >= 1")
     return assign
@@ -539,7 +542,8 @@ class CellRunner:
                   if flags.serve and bloco_cfg.modo == "consulta" else None)
 
         async def session() -> Any:
-            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0, recall=recall,
+            harness = build_harness(ws.path, flags, spec, home=ws.home, max_retries=0,
+                                    max_total_calls=assign.get("max_total_calls"), recall=recall,
                                     env_bin=env_bin)
             try:
                 summarizer = None
@@ -551,7 +555,9 @@ class CellRunner:
                         timeout_s=self.s.rescue_timeout_s, wire=harness.wire)
                 result = await run_task(
                     ws.path, flags, prompt=statement, task_id=f"task-{unit.index:02d}",
-                    max_productive_turns=assign["max_productive_turns"], harness=harness, store=store,
+                    max_productive_turns=assign["max_productive_turns"],
+                    max_total_calls=assign.get("max_total_calls"),
+                    harness=harness, store=store,
                     summarizer_fn=summarizer, adapter=adapter, bloco_cfg=bloco_cfg, recall=recall,
                     modelo_produtor=self.s.model, modelo_consumidor=self.s.model,
                     deadline_s=float(assign["deadline_s"]), on_event=on_event)
@@ -602,7 +608,8 @@ class CellRunner:
             "arm_id": unit.arm_id, "task_index": unit.index, "task_id": task_id,
             "flags": rec.flags_dict(flags),
             "run": result.manifest if result else None,
-            "bench": {"deadline_s": assign["deadline_s"], "max_productive_turns": assign["max_productive_turns"],
+            "bench": {"max_total_calls": assign.get("max_total_calls"),
+                      "total_call_budget_scope": "agent_episode", "deadline_s": assign["deadline_s"], "max_productive_turns": assign["max_productive_turns"],
                       "seed": assign["seed"], "model": self.s.model, "provider_url": self._s(self.s.provider_url),
                       "system_prompt_sha256": system_prompt_sha256(),
                       "bloco_yaml": self.s.bloco_yaml,
@@ -697,6 +704,9 @@ class CellRunner:
                 self._envs[unit.arm_id] = self._setup_environment(ws, unit.arm_id)
             retries.append({"attempt": n, "kind": kind, "detail": record["error"]["detail"],
                             "tokens": record["tokens"], "turns": len(record["turns"]),
+                            **{key: record.get("mechanism_telemetry", {}).get(key) for key in
+                               ("actual_total_calls", "total_call_cap", "total_call_count_source",
+                                "total_call_budget_scope")},
                             "started_at": record["started_at"], "ended_at": record["ended_at"],
                             "commit": lost_commit, "tag": tag, "artifacts": parked, "waited_s": wait})
             self._error("infra_retry", f"{unit.label}: {kind}; attempt {n} discarded "

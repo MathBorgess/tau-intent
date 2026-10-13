@@ -97,6 +97,9 @@ class WireLog:
     """Request bodies as they left the process, plus what they were meant to carry."""
 
     stamp: dict[str, Any]
+    max_total_calls: int | None = None
+    request_attempts: int = 0
+    rejected_over_budget: int = 0
     bodies: list[dict[str, Any]] = field(default_factory=list)
     #: Transport failures seen on the agent's calls (refused, reset, timeout, closed
     #: mid-stream): ``{"type": <httpx class>, "detail": <message>}``. They are how the
@@ -176,6 +179,11 @@ def stamping_transport(inner: Any, stamp: dict[str, Any], wire: WireLog) -> Any:
 
     class StampingTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                if wire.max_total_calls is not None and wire.request_attempts >= wire.max_total_calls:
+                    wire.rejected_over_budget += 1
+                    raise RuntimeError("total model call budget exhausted before transport")
+                wire.request_attempts += 1
             body = await request.aread()
             if request.method == "POST" and body:
                 try:
@@ -321,6 +329,7 @@ def build_harness(
     *,
     system: str | None = None,
     max_retries: int = 2,
+    max_total_calls: int | None = None,
     home: Path | None = None,
     recall: Any = None,
     env_bin: Path | None = None,
@@ -334,7 +343,8 @@ def build_harness(
     from tau_agent.harness import AgentHarness, AgentHarnessConfig
 
     client, wire = stamped_client(spec)
-    provider = build_provider(spec, client, wire, max_retries=max_retries)
+    wire.max_total_calls = max_total_calls
+    provider = build_provider(spec, client, wire, max_retries=0 if max_total_calls is not None else max_retries)
     harness = AgentHarness(
         AgentHarnessConfig(
             provider=provider,

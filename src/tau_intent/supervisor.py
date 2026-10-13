@@ -158,6 +158,7 @@ async def run_task(
     prompt_base: str = "",
     task_id: str = "task",
     max_productive_turns: int | None = 8,
+    max_total_calls: int | None = None,
     gate_cfg: GateConfig | None = None,
     bloco_cfg: BlocoConfig | None = None,
     harness: Any = None,
@@ -203,6 +204,8 @@ async def run_task(
     sup_cfg = supervisor_cfg or load_supervisor_config()
     if max_productive_turns is not None and max_productive_turns < 1:
         raise ValueError("productive turn cap must be positive or None")
+    if max_total_calls is not None and (isinstance(max_total_calls, bool) or not isinstance(max_total_calls, int) or max_total_calls < 1):
+        raise ValueError("total model call cap must be positive or None")
     consulta = flags.serve and flags.project and bloco_cfg.modo == "consulta"
     if consulta and flags.llm_rescue:
         # Q13 (owner, 2026-10-09): arm C is not part of the experiment that
@@ -293,6 +296,20 @@ async def run_task(
 
     collected_events: list[Any] = []
     productive = 0
+    answered_calls = 0
+    wire = getattr(harness, "wire", None)
+    wire_start = getattr(wire, "request_attempts", 0)
+    if max_total_calls is not None and wire is not None:
+        wire.max_total_calls = wire_start + max_total_calls
+
+    def actual_calls():
+        return wire.request_attempts - wire_start if wire is not None and hasattr(wire, "request_attempts") else answered_calls
+
+    def exhaust_total():
+        tel["esbarrou_teto"] = True
+        tel["encerramento"] = "teto_chamadas"
+        tel["total_call_cap_reached"] = True
+
     blocks = 0
     verdict = "NAO_AVALIAVEL" if flags.gate else "PASSA"
     tel["gate_avaliado"] = False
@@ -320,6 +337,10 @@ async def run_task(
     events = harness.prompt(prompt_text).__aiter__()
     try:
         while True:
+            if max_total_calls is not None and actual_calls() >= max_total_calls and last_was_turn_end:
+                exhaust_total()
+                verdict = "TETO"
+                break
             remaining = None if deadline_s is None else deadline_s - decorrido()
             if remaining is not None and remaining <= 0:
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
@@ -336,6 +357,12 @@ async def run_task(
                 tel["encerramento"], verdict = "deadline", "DEADLINE"
                 tel["chamada_interrompida"] = True
                 break
+            except Exception:
+                if max_total_calls is not None and getattr(wire, "rejected_over_budget", 0):
+                    exhaust_total()
+                    verdict = "TETO"
+                    break
+                raise
             last_was_turn_end = _is_turn_end(event)
             if on_event is not None:
                 antes = relogio()
@@ -353,6 +380,8 @@ async def run_task(
                 continue
             if not _is_turn_end(event):
                 continue
+            answered_calls += 1
+            total_exhausted = max_total_calls is not None and actual_calls() >= max_total_calls
             failure = _provider_failure(event)
             if failure is None:
                 # One row per provider call that answered. Turns that follow a
@@ -372,6 +401,10 @@ async def run_task(
                 # tau ends the loop with a TurnEnd whose message has stop_reason
                 # error/aborted and no tool results. That is a dead provider, not a
                 # finished task: running the gate on it would approve an empty diff.
+                if max_total_calls is not None and getattr(wire, "rejected_over_budget", 0):
+                    exhaust_total()
+                    verdict = "TETO"
+                    break
                 tel["erro_de_provedor"] = failure
                 tel["encerramento"], verdict = "error", "ERRO"
                 break
@@ -382,16 +415,21 @@ async def run_task(
                 # a hard ceiling of three caps keeps the session finite.
                 if not follow_ups or sup_cfg.teto_conta_resposta_a_bloqueio:
                     productive += 1
+                if total_exhausted:
+                    exhaust_total()
+                    verdict = "TETO"
+                    break
                 teto_absoluto = (max_productive_turns is not None and not sup_cfg.teto_conta_resposta_a_bloqueio
                                  and turnos_com_ferramenta >= 3 * max_productive_turns)
-                if (max_productive_turns is not None and productive >= max_productive_turns) or teto_absoluto:
+                if max_total_calls is None and ((max_productive_turns is not None and productive >= max_productive_turns) or teto_absoluto):
                     tel["esbarrou_teto"] = True
                     tel["encerramento"] = "teto_turnos"
                     tel["teto_absoluto"] = bool(teto_absoluto)
                     verdict = "TETO"
                     break
                 if not aviso_enviado:
-                    restantes = None if max_productive_turns is None else max_productive_turns - productive
+                    restantes = ((max_total_calls - actual_calls()) if max_total_calls is not None else
+                                 None if max_productive_turns is None else max_productive_turns - productive)
                     if restantes is not None and 0 < restantes <= sup_cfg.aviso_turnos_restantes:
                         enviar_aviso("teto")
                     elif deadline_s is not None and \
@@ -422,6 +460,10 @@ async def run_task(
             verdict = v.tipo
             if v.tipo == "BLOQUEIA":
                 blocks += 1
+                if total_exhausted:
+                    exhaust_total()
+                    verdict = "TETO"
+                    break
                 msg = render_falhas(v.falhas)
                 follow_ups.append(msg)
                 harness.follow_up(msg)
@@ -504,6 +546,11 @@ async def run_task(
     tel["latencia_de_captura"] = latencia_de_captura(pendentes)
     tel["aproveitamento_do_bloco"] = aproveitamento_do_bloco(servidas, regions)
     tel["fora_do_relogio_s"] = round(fora_do_relogio, 3)
+    tel["actual_total_calls"] = actual_calls()
+    tel["total_call_cap_reached"] = max_total_calls is not None and actual_calls() >= max_total_calls
+    tel["total_call_cap"] = max_total_calls
+    tel["total_call_budget_scope"] = "agent_episode"
+    tel["total_call_count_source"] = "wire_requests" if wire is not None and hasattr(wire, "request_attempts") else "turn_end_events"
     tel["productive_turns"] = productive
     tel["block_turns"] = sum(1 for turno in turnos if turno["kind"] == "block")
     tel["bloqueios"] = blocks
