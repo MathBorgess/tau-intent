@@ -117,6 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     off.add_argument("--k-max", type=int, default=1000, help="tasks to run (default: all)")
     off.add_argument("--deadline-s", type=int, default=600)
     off.add_argument("--max-productive-turns", type=int, default=8)
+    off.add_argument("--max-total-calls", type=int, default=None,
+                     help="cap all agent provider requests per episode; SDK retries disabled")
     return parser
 
 
@@ -199,6 +201,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                   "mode": args.mode, "arms": ["A"] if args.mode == "qualification" else arms,
                   "seed": args.seed, "k_max": args.k_max, "deadline_s": args.deadline_s,
                   "max_productive_turns": args.max_productive_turns}
+        if args.max_total_calls is not None:
+            assign["max_total_calls"] = args.max_total_calls
         try:
             validate_assign(assign)
             outcome = run_offline(settings, assign, log)

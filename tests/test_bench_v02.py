@@ -416,9 +416,12 @@ class TestBackendFailuresAreInfrastructure(unittest.TestCase):
     def test_an_http_error_is_a_provider_error_and_is_not_retried(self):
         with tempfile.TemporaryDirectory() as tmp, StubServer([], status=lambda i: 500) as stub:
             runner = make_cell(Path(tmp), stub)
-            outcome = runner.run({**ASSIGN, "arms": ["A"], "k_max": 1})
+            outcome = runner.run({**ASSIGN, "arms": ["A"], "k_max": 1, "max_total_calls": 32})
             (record,) = read_records(outcome.cell_dir)
             seen = len(stub.requests)
+        self.assertEqual(record["mechanism_telemetry"]["actual_total_calls"], 1)
+        self.assertEqual(record["mechanism_telemetry"]["total_call_cap"], 32)
+        self.assertEqual(record["mechanism_telemetry"]["total_call_count_source"], "wire_requests")
         self.assertEqual(seen, 1, "a failed call must not be repeated: retries would change the treatment")
         self.assertEqual(record["terminated_by"], "error")
         self.assertEqual(record["error"]["kind"], "provider_error")
