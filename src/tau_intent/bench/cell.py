@@ -563,10 +563,15 @@ class CellRunner:
                     deadline_s=float(assign["deadline_s"]), on_event=on_event)
                 return result, summarizer
             finally:
+                wire_receipt.update(actual_total_calls=harness.wire.request_attempts,
+                                    total_call_cap=assign.get("max_total_calls"),
+                                    total_call_count_source="wire_requests",
+                                    total_call_budget_scope="agent_episode")
                 net_errors.extend(harness.wire.network_errors)
                 statuses.extend(harness.wire.statuses)
                 await harness.aclose()
 
+        wire_receipt: dict[str, Any] = {}
         net_errors: list[dict[str, str]] = []
         statuses: list[int] = []
         result = summarizer = None
@@ -602,7 +607,7 @@ class CellRunner:
                                                       encoding="utf-8")
         served = montar("", statement, result.bloco if result else "")
         (unit_dir / "prompt.txt").write_text(served, encoding="utf-8")
-        tel = result.telemetry if result else {}
+        tel = result.telemetry if result else dict(wire_receipt)
         terminated = "error" if failure is not None else tel.get("encerramento", "error")
         manifest = {
             "arm_id": unit.arm_id, "task_index": unit.index, "task_id": task_id,
