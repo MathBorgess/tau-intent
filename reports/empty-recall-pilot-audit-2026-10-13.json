@@ -1,0 +1,135 @@
+{
+  "schema": "empty-recall-pilot-audit-1",
+  "run": "/home/ubuntu/workspace/mathai-harness/data/frontier/piloto-swem-linux-arm64-isolated-2026-10-13",
+  "upstream_base": "83d1943c4aca98af1cdbe20e2b58217c6018898c",
+  "complete": true,
+  "cases": [
+    {
+      "family": "openai",
+      "task_index": 1,
+      "query_at": "2026-10-13T13:00:15.938Z",
+      "query": {
+        "paths": [
+          "sklearn/utils/_array_api.py",
+          "sklearn/utils/_encode.py",
+          "sklearn/preprocessing/_label.py",
+          "sklearn/metrics/_regression.py",
+          "sklearn/metrics/pairwise.py"
+        ]
+      },
+      "published_current_entries": 0,
+      "published_current_files": {},
+      "direct_matches": [],
+      "published_current_ids": [],
+      "empty_reason": "no_published_history",
+      "result": "ok=true; no recorded intent",
+      "intent_store_sha256": "a2f8bf8341e0ef09ca7029632ec9294ae207cee38a431b40130aefe923bb22fb",
+      "transcript_sha256": "52a8bd0ddfb6754deb09e41f787d653e485c552e9eeb857e32779d9b46c39745",
+      "publication_after_query": 0,
+      "pending_at_final": 30
+    },
+    {
+      "family": "openai",
+      "task_index": 2,
+      "query_at": "2026-10-13T13:23:38.270Z",
+      "query": {
+        "paths": [
+          "sklearn/tree/_splitter.pyx",
+          "sklearn/tree/_partitioner.pyx",
+          "sklearn/tree/_classes.py",
+          "sklearn/ensemble/_iforest.py"
+        ]
+      },
+      "published_current_entries": 0,
+      "published_current_files": {},
+      "direct_matches": [],
+      "published_current_ids": [],
+      "empty_reason": "no_published_history",
+      "result": "ok=true; no recorded intent",
+      "intent_store_sha256": "a2f8bf8341e0ef09ca7029632ec9294ae207cee38a431b40130aefe923bb22fb",
+      "transcript_sha256": "fae414437f559ff9257d5b9862ef9e9288ee57073b521cd277ef1703aae9588c",
+      "publication_after_query": 9,
+      "pending_at_final": 0
+    },
+    {
+      "family": "anthropic",
+      "task_index": 1,
+      "query_at": "2026-10-13T13:04:27.084Z",
+      "query": {
+        "paths": [
+          "sklearn/utils/_array_api.py",
+          "sklearn/metrics/_regression.py",
+          "sklearn/metrics/pairwise.py",
+          "sklearn/preprocessing/_label.py",
+          "sklearn/utils/_encode.py"
+        ]
+      },
+      "published_current_entries": 0,
+      "published_current_files": {},
+      "direct_matches": [],
+      "published_current_ids": [],
+      "empty_reason": "no_published_history",
+      "result": "ok=true; no recorded intent",
+      "intent_store_sha256": "585c8823f082f7d309aff0ac3510277d86f9c06ee6463054c0df1194db1da5ab",
+      "transcript_sha256": "b80a8b38ebb2444bb7eab79593cd98d3b34ef595565012533c3a367638bbf376",
+      "publication_after_query": 5,
+      "pending_at_final": 19
+    },
+    {
+      "family": "anthropic",
+      "task_index": 2,
+      "query_at": "2026-10-13T13:46:10.437Z",
+      "query": {
+        "paths": [
+          "sklearn/tree/_classes.py",
+          "sklearn/tree/_splitter.pyx",
+          "sklearn/tree/_partitioner.pxd",
+          "sklearn/tree/_partitioner.pyx",
+          "sklearn/ensemble/_iforest.py",
+          "sklearn/tree/_criterion.pxd",
+          "sklearn/tree/_criterion.pyx"
+        ]
+      },
+      "published_current_entries": 5,
+      "published_current_files": {
+        "sklearn/utils/_array_api.py": 5
+      },
+      "direct_matches": [],
+      "published_current_ids": [
+        "3a46ba9d-2836-423e-baed-fc0101f48429",
+        "9b211331-fc98-426f-8680-1f25a07408b7",
+        "b4aacd16-4c14-4821-9769-0563c4d95fef",
+        "99167eab-9a7d-4f74-bb7f-633f1f42b949",
+        "1682370b-28fd-4ccf-9f7c-de938458a229"
+      ],
+      "empty_reason": "query_files_have_no_published_history",
+      "result": "ok=true; no recorded intent",
+      "intent_store_sha256": "585c8823f082f7d309aff0ac3510277d86f9c06ee6463054c0df1194db1da5ab",
+      "transcript_sha256": "c493f94d2faac0d0c253f91a53139773fb8785205cdaf132922942d08a3a8019",
+      "publication_after_query": 20,
+      "pending_at_final": 0
+    }
+  ],
+  "findings": [
+    "All four queries use relative paths and no symbols.",
+    "Both first-stage queries precede publication.",
+    "Luna publishes no first-stage entries, so its second-stage query has no history.",
+    "Haiku carries five array_api.py intents; its second-stage query asks tree and ensemble files.",
+    "Current-stage publication remains eligible because RecallService rereads IntentStore on each call.",
+    "No evidence requires a selection or path-normalization change."
+  ],
+  "positive_canary": {
+    "source": "frozen sklearn seed/sklearn/utils/_array_api.py",
+    "publication_api": "IntentStore.append",
+    "published_entries": 5,
+    "lookup": "fresh RecallService and IntentStore, no conversation",
+    "served_entries": 5,
+    "hidden_inputs": false
+  },
+  "limitations": [
+    "Published store timestamps use seconds. These calls are far from publication boundaries.",
+    "The positive canary publishes synthetic author text on real implementation functions; it does not measure model benefit.",
+    "Unpublished pending capture is not eligible recall history.",
+    "Structured diagnostics add telemetry only; model-facing text and projection rules stay unchanged."
+  ]
+}
